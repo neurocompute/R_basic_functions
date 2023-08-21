@@ -1,3 +1,13 @@
+#R functions to read, analyze, plot and detect patterns in data along with neural and computer algorithms to model complex data.    
+#Copyright (C) 2023 Shyam Srinivasan 
+
+#This program is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+
+#This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Affero General Public License for more details.
+
+#You should have received a copy of the GNU Affero General Public License along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+
 #This file contains code for implementing machine learning algorithms (not neural networks) like SVM, LDA, kNN etc.
 #Files or packages to include: e1071 for SVM, kNN is written by me.
 
