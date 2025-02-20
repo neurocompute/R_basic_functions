@@ -12,12 +12,14 @@
 #function to calculate the euclidean distance between two vectors
 # x and y, where each contains 2 columns of {x,y} coords
 
-#this function takes two vectors of 2 dimensional points and returns a vector of the 
+#this function takes two vectors of n dimensional points and returns a vector of the 
 #distance between them
 ComputeDistance <- function(x1,x2) {
   #the euclidean distance calculation
-  x3 <- sqrt((x1[,1]-x2[,1])^2+(x1[,2]-x2[,2])^2)
-  x3
+  # x3 <- sqrt((x1[,1]-x2[,1])^2+(x1[,2]-x2[,2])^2)
+  # x3
+  vec <- lpnorm(x1 - x2,2)
+  vec
 }
 
 #this function takes 4 vectors of 2 dimensional points and returns a vector of the 
@@ -27,6 +29,21 @@ ComputeDistance2 <- function(x1,y1,x2,y2) {
   x3 <- sqrt((x1-x2)^2+(y1-y2)^2)
   x3
 }
+
+
+#gets the slope of the line between two points
+#ptx: of the form c(dim1,dim2,...)
+#op: 1 - just x and y diemnsions
+#op: 2 - x and y dimension slope angle in degrees
+computeSlope <- function(pt1,pt2,op=2){
+  #cat('\nSlope',pt2,':',pt1)
+  slope <- (pt2[2]-pt1[2])/(pt2[1]-pt1[1])  
+  angle <- atan(slope) * 180/pi
+  
+  return(switch(op,slope,angle))
+}
+
+
 
 #this function 2 vectors of x and y points and calculates the velocity
 #x and y are vectors of x and y positions, and t is the no of frames/sec
@@ -142,8 +159,12 @@ specify_decimal <- function(x, k) trimws(format(round(x, k), nsmall=k))
 
 #get the number of decimal places in x
 decimalplaces <- function(x) {
+  #cat('\ndecimal places',x,':',abs(x - round(x)),':',.Machine$double.eps^0.5 )
+  #print(strsplit(sub('0+$', '', as.character(x)), ".", fixed = TRUE))
   if (abs(x - round(x)) > .Machine$double.eps^0.5) {
-    nchar(strsplit(sub('0+$', '', as.character(x)), ".", fixed = TRUE)[[1]][[2]])
+    nodigits <- nchar(strsplit(sub('0+$', '', as.character(x)), ".", fixed = TRUE)[[1]])
+    if(length(nodigits)==1) return(0)
+    else return(nodigits[2])
   } else {
     return(0)
   }
@@ -188,6 +209,27 @@ isSubset <- function(set,superset,op=1){
   sum(as.numeric(set %in% superset)) == length(set)
 }
 
+#filters a vector to avoid Inf numbers Or just return a list of the posns of the Inf 
+#causing numbers
+#oper: 1 - filter so that log(vec) does not give inf
+#op: 1 - posns, 2 - values
+clearVecInf <- function(vec,oper=1,op=1){
+  resvec <- vec
+  if(oper==1){# apply log(vec)
+    posns <- which(vec == 0)
+    resvec[posns] <- 10^-10 #number close to 0
+    res <- switch(op,posns,res)
+    return(res)
+  }
+  F
+}
+
+#this gets the posns of NA and Inf in the vector
+getVecNAInf <- function(vec,op=1){
+  positions <- which(is.infinite(vec) | is.na(vec))
+  positions
+}
+
 #given two sets, gets the overlap between them in terms of values. For instance if set A has 
 #50 points and B 45 points, will get the number of points in A that are higher than the least number in A
 #and vice versa, e.g.,
@@ -212,12 +254,13 @@ getSetOverlapNos <- function(setA,setB,op=1){
 }
 
 #calculates the permutations of vector vec for the given number of combinations k, i.e., n choose k
+#op=1, no repeats, 2 - allow repeats
 perm <- function(vecn,k,op=1){
   #cat('\nperm',vecn,',',k)
   if(k <= 0) return(c())
   res <- c()
   for(i in seq_wrap(1,length(vecn)) ){
-    others <- setdiff(vecn,vecn[i])
+    others <- checkCond(op==1,setdiff(vecn,vecn[i]),vecn)
     combos <- perm(others,k-1)
     if(length(combos)>0) perms <- cbind(rep(vecn[i],nrow(combos)),combos)
     else perms <- vecn[i]
@@ -279,6 +322,17 @@ permuteGroupsOnce <- function(lst,k,op=1){
     res <- rbind(res,res.perm)
   } 
   res
+}
+
+#function genNameComb that takes a vector of names lst.names as input and 
+#generates combinations based on whether the names are numeric or strings:
+genNameComb <- function(lst.names) {
+  # Check if names are numeric or strings and generate combinations
+  if (all(suppressWarnings(!is.na(as.numeric(lst.names))))) {
+    combn(lst.names, 2, paste, collapse = ",")
+  } else {
+    combn(lst.names, 2, paste, collapse = "-")
+  }
 }
 
 #pick elements from each of the list vectors, and purges them from the vectors after picking
@@ -436,6 +490,233 @@ computeOverlappingCircles <-function(r1,r2,ht,op=1){
     circ1-chord.tot,circ2-chord.tot)
 }
 
+# Helper function to find the cross product magnitude in 2D
+crossProductMagnitude <- function(a, b) {
+  return(a[1] * b[2] - a[2] * b[1])
+}
+
+# Recursive function to find the convex hull
+quickhull <- function(points, P1, P2, side) {
+  if (nrow(points) == 0) return(matrix(nrow = 0, ncol = ncol(points)))
+  
+  # Calculate the cross products to find the point farthest from the line
+  distances <- apply(points, 1, function(p) {
+    crossProductMagnitude(P2 - P1, p - P1)
+  })
+  farthest.point <- points[which.max(distances), , drop = FALSE]
+  
+  # If no points are on the specified side, return an empty matrix
+  if (max(distances) <= 0) {
+    return(matrix(nrow = 0, ncol = ncol(points)))
+  }
+  
+  # Points on the left side of the line P1-farthest.point
+  left.of.P1.farthest <- points[apply(points, 1, function(p) {
+    crossProductMagnitude(farthest.point - P1, p - P1) > 0
+  }), , drop = FALSE]
+  
+  # Points on the left side of the line farthest.point-P2
+  left.of.farthest.P2 <- points[apply(points, 1, function(p) {
+    crossProductMagnitude(P2 - farthest.point, p - farthest.point) > 0
+  }), , drop = FALSE]
+  
+  # Recursively find the convex hull on the two sides
+  left.hull <- quickhull(left.of.P1.farthest, P1, farthest.point, side)
+  right.hull <- quickhull(left.of.farthest.P2, farthest.point, P2, side)
+  
+  # Combine the hulls
+  return(rbind(left.hull, farthest.point, right.hull))
+}
+
+# Function to compute the convex hull for n-dimensional points
+# points: the points are in matrix form
+computeConvexHull <- function(points) {
+  # Check if points is a matrix and has at least two dimensions
+  if (!is.matrix(points) || ncol(points) < 2) {
+    stop("Input must be a matrix with at least two dimensions")
+  }
+  
+  # Find the leftmost and rightmost points
+  leftmost.point <- points[which.min(points[, 1]), , drop = FALSE]
+  rightmost.point <- points[which.max(points[, 1]), , drop = FALSE]
+  
+  # Points on the left side of the line leftmost.point-rightmost.point
+  left.of.line <- points[apply(points, 1, function(p) {
+    crossProductMagnitude(rightmost.point - leftmost.point, p - leftmost.point) > 0
+  }), , drop = FALSE]
+  
+  # Points on the right side of the line leftmost.point-rightmost.point
+  right.of.line <- points[apply(points, 1, function(p) {
+    crossProductMagnitude(rightmost.point - leftmost.point, p - leftmost.point) < 0
+  }), , drop = FALSE]
+  
+  # Recursively find the convex hull on both sides
+  left.hull <- quickhull(left.of.line, leftmost.point, rightmost.point, 1)
+  right.hull <- quickhull(right.of.line, rightmost.point, leftmost.point, -1)
+  
+  # Combine the hulls
+  convex.hull <- rbind(leftmost.point, left.hull, rightmost.point, right.hull)
+  
+  # Remove duplicates and ensure correct ordering
+  convex.hull <- convex.hull[!duplicated(convex.hull), ]
+  
+  return(convex.hull)
+}
+
+
+#-----------new convex hull functions for 2d and 3d as of sep. 30, 2024 --------------
+
+#gets the convex Hull for a matrix in SWC format 
+swcGetConvexHull <- function(mat.swc,cols=2:4,op=1){
+  # Extract coordinates (x, y, z)
+  coords <- mat.swc[,cols]
+  
+  # Compute convex hull indices
+  hull.indices <- chull(coords)
+  
+  # Subset mat.swc to include only convex hull points
+  convex.hull.points <- mat.swc[hull.indices, ]
+  
+  return(convex.hull.points)
+}
+
+# Helper function to compute the cross product of two vectors of length 3
+getCrossProduct3Vec <- function(u, v) {
+  return(c(
+    u[2] * v[3] - u[3] * v[2],
+    u[3] * v[1] - u[1] * v[3],
+    u[1] * v[2] - u[2] * v[1]
+  ))
+}
+
+# Helper function to compute the volume of a tetrahedron formed by four points
+getTetrahedronVolume <- function(a, b, c, d) {
+  return(abs(sum((a - d) * getCrossProduct3Vec(b - d, c - d))) / 6)
+}
+
+# Helper function to find the furthest point from a plane formed by three points
+findFurthestPtPlane <- function(points, a, b, c) {
+  volumes <- sapply(1:nrow(points), function(i) {
+    getTetrahedronVolume(a, b, c, points[i, ])
+  })
+  furthest.index <- which.max(volumes)
+  return(furthest.index)
+}
+
+#the quickHll algo in 3d: gets all the points that form the hull
+quickhull3d <- function(points) {
+  # Base case: if there are fewer than 4 points, return them all
+  if (nrow(points) <= 4) {
+    return(1:nrow(points))
+  }
+  
+  # Initialize the convex hull with the points on the outer edges
+  hull.indices <- c()
+  
+  # Find the extreme points (min/max in each dimension)
+  min.x.index <- which.min(points[, 1])
+  max.x.index <- which.max(points[, 1])
+  min.y.index <- which.min(points[, 2])
+  max.y.index <- which.max(points[, 2])
+  min.z.index <- which.min(points[, 3])
+  max.z.index <- which.max(points[, 3])
+  
+  # Initial hull points are these extreme points
+  hull.points <- unique(c(min.x.index, max.x.index, min.y.index, max.y.index, min.z.index, max.z.index))
+  
+  # Recursively find the furthest points and build the convex hull
+  for (i in 1:length(hull.points)) {
+    for (j in (i + 1):length(hull.points)) {
+      for (k in (j + 1):length(hull.points)) {
+        remaining.points <- points[-hull.points, ]
+        furthest.index <- findFurthestPtPlane(remaining.points, points[hull.points[i], ], points[hull.points[j], ], 
+                                              points[hull.points[k], ])
+        if (length(furthest.index) > 0) {
+          hull.indices <- unique(c(hull.indices, hull.points[i], hull.points[j], hull.points[k], furthest.index))
+        }
+      }
+    }
+  }
+  
+  return(hull.indices)
+}
+
+# Wrapper function for the 3D convex hull algorithm
+getConvexHull3d <- function(mat.swc) {
+  # Extract coordinates (x, y, z)
+  coords <- mat.swc[, 2:4]
+  
+  # Compute convex hull indices using Quickhull in 3D
+  hull.indices <- quickhull3d(coords)
+  
+  # Subset mat.swc to include only convex hull points
+  convex.hull.points <- mat.swc[hull.indices, ]
+  
+  return(convex.hull.points)
+}
+
+# Helper function to calculate the area of a polygon in 2D
+computeCHullArea2d <- function(coords) {
+  n <- nrow(coords)
+  x <- coords[, 1]
+  y <- coords[, 2]
+  # Shoelace formula to compute area of the polygon
+  area <- 0.5 * abs(sum(x * c(y[-1], y[1]) - y * c(x[-1], x[1])))
+  return(area)
+}
+
+# Helper function to compute volume of a tetrahedron
+# tetrahedron.volume <- function(a, b, c, d) {
+#   return(abs(sum((a - d) * cross.product(b - d, c - d))) / 6)
+# }
+
+# Compute volume for 3D convex hull points
+computeCHullVolume3d <- function(points) {
+  # Choose the first point as the reference point
+  reference <- points[1, ]
+  
+  # Sum the volume of tetrahedra formed by the reference point and triangles of other points
+  volume <- 0
+  for (i in 2:(nrow(points) - 1)) {
+    for (j in (i + 1):nrow(points)) {
+      volume <- volume + getTetrahedronVolume(reference, points[i, ], points[j, ], points[nrow(points), ])
+    }
+  }
+  
+  return(volume)
+}
+
+# Main function to compute the convex hull area (2D) or volume (3D)
+# op=1- area in 2d, 2 - volumne in 3d
+computeConvexHullArea <- function(mat.swc,op=1) {
+  # Extract the coordinates (x, y, z)
+  coords <- mat.swc[, 2:4]
+  
+  # Determine whether the points are 2D or 3D based on z coordinates
+  # if (all(coords[, 3] == 0)) {
+  if(op==1){
+    # 2D case: Compute the area
+    return(computeCHullArea2d(coords[, 1:2]))  # Use only x and y coordinates
+  } else {
+    # 3D case: Compute the volume
+    return(computeCHullVolume3d(coords))
+  }
+}
+
+
+# # Example Usage
+# points.2d <- matrix(c(1, 1, 3, 1, 2, 2, 8, 6, 3, 3, 4, 2, 5, 4, 1, 7), ncol = 2, byrow = TRUE)
+# 
+# # Compute the convex hull
+# hull.2d <- computeConvexHull(points.2d)
+# 
+# # Print the result
+# print(hull.2d)
+# 
+# # Plot the points and the convex hull
+# plot(points.2d, main = "Convex Hull Example", xlab = "X", ylab = "Y", pch = 19)
+# polygon(hull.2d, border = "red", lwd = 2)
+# points(hull.2d, col = "red", pch = 19)
 
 
 

@@ -1,13 +1,3 @@
-#R functions to read, analyze, plot and detect patterns in data along with neural and computer algorithms to model complex data.    
-
-#Copyright (C) 2023 Shyam Srinivasan 
-
-#This program is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
-
-#This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Affero General Public License for more details.
-
-#You should have received a copy of the GNU Affero General Public License along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
 
 #circuits.R: code for implementing perceptrons and other neuronal networks: Shyam Srinivasan (C), shyam@snl.salk.edu
 #version 1.1 contains code for a variable number of valences, i.e., MBONs and DANs. In this the number of MBONs and DANs should match.
@@ -18,11 +8,19 @@
 
 
 #setup constants here as a list: Neuron, connection matrix, and FlyMBg object
-#Anytime these are changed, they have to be done so in three places: here, init, and set/get
+#Anytime these are changed, they have to be done so in three places: here, init or the newStruct
+#constructor, and set/get (more like get, because set does it by number)
 #Specific rules for inserting. The numbers have to be contiguous because they serve as indices to the vector 
 #of names, so you have to increase the number of everyone after your insertee.
 #const.N$id gives you the structure's id inside const.FM for example res$apl$id = const.FM$apl
-const.N <- list(neurons=1,neurondesc=2,dist=3,basenoise=4,neurontype=5,params=6,posns=7,noise=8,id=9,thresh=10)
+#2.0
+#new variable in const.N: base_noise: the base noise to be added to the neuron, sampled from a Gaussian
+#by default. If 0, no base noise, or could be list(noise dist,noise params,additive=0 by default-1 would 
+#be multiplicative). Basenoise acts the following way: if neuron is silent, then activity is base noise
+#If we are calculating target neuron rate, then target rate = input(1+noise)*connMat(1+noise). Here base
+#noise does not come into play.
+const.N <- list(neurons=1,neurondesc=2,dist=3,basenoise=4,neurontype=5,params=6,posns=7,noise=8,id=9,
+                thresh=10,base_noise=11)
 const.CM <- list(connmat=1,type=2,source=3,target=4,params=5,size=6,syndist=7,noise=8,
                  learningrule=9,gain=10,dopno=11,dopparams=12,dopdist=13,doptype=14,dopconn=15,curtime=16,
                  synactfn=17)
@@ -79,7 +77,7 @@ const.FM <- list(glom=1,mbkc=2,mbkc_net=3,apl=4,dans=5,mbons=6,
 #here type: 1 - absolute thresh, i.e., sig - no, 2 - percentile thresh, no is between (0,100) i.e., sig - thresh, 
 #where thresh is bottom no percentile,e.g., if no=5, no. that marks the end of the 5th percentile. 
 newNeurons <- function(number=1,basenoise=F,neurontype=1,neurondesc='excitatory',posns=0,dist=1,params=c(10,1),exparams=c(),
-                       noise=list(0,c(0,0),0),noStimuli=1,id=1,thresh=c(1,0),op=1){
+                       noise=list(0,c(0,0),0),noStimuli=1,id=1,thresh=c(1,0),base_noise=c(0),op=1){
   #generate the 
   neurons <- genNeurons(number = number,basenoise = basenoise,dist = dist,params = params,noStimuli = noStimuli,noise=noise)
   #posns, figure this one out when we actually use it. Might be tricky like figuring out the rostral caudal gradient
@@ -87,8 +85,8 @@ newNeurons <- function(number=1,basenoise=F,neurontype=1,neurondesc='excitatory'
     
   }
   names(neurons) <- 1:noStimuli #name all the stimuli on the lists
-  cells <- list(neurons,neurondesc,dist,basenoise,neurontype,params,posns,noise,id,thresh)
-  names(cells) <- c('neurons','neurondesc','dist','basenoise','neurontype','params','posns','noise','id','thresh')
+  cells <- list(neurons,neurondesc,dist,basenoise,neurontype,params,posns,noise,id,thresh,base_noise)
+  names(cells) <- c('neurons','neurondesc','dist','basenoise','neurontype','params','posns','noise','id','thresh','base_noise')
   res <- structure(cells,class = 'Neurons') #make it a class and return it
   #print(cells)
   #cat('\n new neurons',res$id,res$thresh,'done',res[[9]],res[[10]],'\n')
@@ -194,7 +192,7 @@ newConnMatrix <- function(size=c(1,1),type=1,syndist=3,params=c(1,1.15,.16),dop=
   target <- size[2]
   #  glommb_conn <- newConnMatrix(c(glomno,kcno),syndist = 10,params=glommb_conn,dop=c())
   if(type==1){#distributed circuit
-    #cat('\nnewconn',size)
+    #cat('\nnewconn',size,'params ',unlist(params),'type',type)
     connMat <- genConnMat(rows = size[2],cols = size[1],params = params,type = syndist,noise = noise)
   }
   if(type==2){#topographic circuit
@@ -277,6 +275,40 @@ normSynWts <- function(self,mbkc.neurons,valence=1,aplCut=0,op=1){
   circuit.mb <- setData(self,val=kcmbon_conn.lst,index=const.FM$kcmbon_conn) #update the list of matrices in the circuit structure
   #cat('\nnormsynwts',circuit.mb$kcmbon_conn.avo$synActFn(.2),circuit.mb$kcmbon_conn.app$synActFn(.2),valence)
   circuit.mb
+}
+
+
+#this scales the structure in question by the parameters specified
+scaleStruct <-function(self,...){
+  UseMethod("scaleStruct",self)
+}
+
+
+#cm: the connection matrix structure
+#scalefac: scale the matrix by this factor
+#type: 1, multiply or divide, 2 - add or subtract
+scaleStruct.ConnMatrix <- function(self,scalefac=1,type=1,op=1){
+  #choose the operation
+  oper <- switch(type,
+                 `1` = `*`,  # Multiplication for type == 1
+                 `2` = `+`   # Addition for type == 2
+  )
+  newconn <- self
+  #check if it is a matrix or a list of matrices, and then do the scaling
+  # cat('\ntype',class(self))
+  # cat('\nData type:',isDataType(self$connMat),const.DataType$list)
+  if(isDataType(self$connMat) == const.DataType$list){#list, do each entry individually
+    scale.cm <- lapply(self$connMat, function(x){
+      oper(scalefac,x)
+    })
+    newconn$connMat <- scale.cm
+    return(newconn)
+  }
+  if(isDataType(self$connMat) == const.DataType$matrix || isDataType(self$connMat) == const.DataType$dataframe){#matrix or DF
+    newconn$connMat <- oper(scalefac,self)
+    return(newconn)
+  }
+  F
 }
 
 
@@ -2028,8 +2060,8 @@ exploreNoiseParams<-function(noruns,notrials,noodors=6,noiserange=seq(0,0.3,0.1)
 #seqop: the options for the processnoiseseqresults function. 
 #seqop=1, get ratio of rel to unrel cells per trial, =2, no of rel cells/trial
 #seqop=3, no of unrel cells/trial, 4 - # rel cells/odor, 5 - # unrel/odor
-#op=1, whatever option is specified by seqop, 100 - combination of those that return a single value (mean)
-#op=101 combination of those that return a single value (SD), 102: get both mean and SD
+#op=1, whatever option is specified by seqop, 100 - combination of those that return a single value 
+#(mean) op=101 combination of those that return a single value (SD), 102: get both mean and SD
 processNoiseSeqRunsResults <- function(dat.ls,seqop=1,op=1){
   if(op==100 || op==101 || op== 102){#multiple options
       res1 <- processNoiseSeqRunsResults(dat.ls,seqop = 1,op=1)
@@ -2367,6 +2399,7 @@ computeMatCor <- function(mat1,mat2,op=1){
 #op=3, no of unrel cells/trial, 4 - # rel cells/odor, 5 - # unrel/odor
 processNoiseSeqResults <- function(res.ls,op=1){
   rel <- unlist(lapply(lapply(res.ls,'[[',2),'[[',1))
+  #cat('\ncircuits ',str(rel),str(lapply(res.ls,'[[',2)) )
   unrel <- unlist(lapply(lapply(res.ls,'[[',2),'[[',2))
   odor.unrel <- unlist(lapply(lapply(res.ls,'[[',1),'[[',3))
   odor.rel <- unlist(lapply(lapply(res.ls,'[[',1),'[[',2))
@@ -2398,7 +2431,8 @@ exploreNoise <-function(self,...){
 #resop: option for the how the results output should be formatted, 1 = mbkc_net firing rates, 2 - mbkc, 3 - glomerular 
 #4 - glomerular and mbkc firing rates, 10 - all the circuits
 #outcomp: the outputcomponent we want to see, 1 - glom, 2 - mbkc, 3 - mbkcnet, 4 - mbons
-exploreNoise.FlyMBg <-function(self,notrials,noiseparams=list(1,c(0,0.1),1),noiseset=1,outcomp=1,op=1,resop=1){
+exploreNoise.FlyMBg <-function(self,notrials,noiseparams=list(1,c(0,0.1),1),noiseset=1,outcomp=1,
+                               op=1,resop=1){
   #add noise to the requisite elements
   #cat('\nexplorenoiseFly',str(noiseparams),'op ',op)
   circuit <- setNoiseParams(self,noiseparams = noiseparams,op=op) 
@@ -2421,6 +2455,13 @@ exploreNoise.FlyMBg <-function(self,notrials,noiseparams=list(1,c(0,0.1),1),nois
          res)#5
 }
 
+#generic method for setting noise in a circuit
+setNoiseParams <-function(self,...){
+  UseMethod("setNoiseParams",self)
+}
+
+
+
 #sets the noise parameters for the required components
 #noiseparams: of the form list(dist,distparams,type of noise:multiplicative or addiditev)
 #if noise has to be added to multiple components, it has to be a list of lists
@@ -2431,7 +2472,7 @@ exploreNoise.FlyMBg <-function(self,notrials,noiseparams=list(1,c(0,0.1),1),nois
 #19 - mbkc & apl-kc , 20 - apl, apl-kc, pn-mb, 21 - apl & apl-kc & mbkc, 22 - apl, apl-kc, pn-mb, pn, 
 #30 - apl, apl-kc, pn-mb, pn, mbkc
 #100 - add noise according to noise params to every structure
-setNoiseParams <- function(self,noiseparams=list(1,c(0,0.1),1),op=1){
+setNoiseParams.FlyMBg <- function(self,noiseparams=list(1,c(0,0.1),1),op=1){
   circuit <- self
   #choose the components to which we will be adding noise
   compids <- setNoiseCompIds(op)
@@ -2767,7 +2808,7 @@ computeFiring.Neurons <- function(self,connMat,dest=c(),stimno=c(),noiseop=F,op=
   #do a check to confirm that the matrices are correct. So, the orign and dest neurons desc should match
   #the same fields in the matrix
   origin <- self
-  #cat('\nCF.neurons',self$id,stimno)
+  #cat('\nCF.neurons',self$id,stimno,'size cm:',size(connMat)[1],' size src:',size(origin,op=2))
   if ( size(connMat)[1] != size(origin,op=2) ){
     cat('\n Conn Matrix and neuron populations do not match',size(connMat)[1],',',size(origin,op=2))
     return(F)
@@ -2793,6 +2834,7 @@ computeFiring.Neurons <- function(self,connMat,dest=c(),stimno=c(),noiseop=F,op=
     names(res) <- c() #we dont want an indexed list number
     unlist(res)
   })
+  #cat('\nCF.neurons',self$id,stimno)
   #set the target and then assign the computed firing rates to the appropriate stimuli in the target, and threshold appropriately
   if(length(dest)>0) { 
     target <- dest
@@ -3018,8 +3060,8 @@ getData.ConnMatrix <- function(self,datatype=1,op=1){
 getData.Neurons <- function(self,datatype=1,stimno=c(),op=1){
   switch(op,switch(datatype,
                    self$neurons,self$neurondesc,self$dist,self$basenoise,self$neurontype,self$params,self$posns,self$noise,self$id,
-                   self$thresh), #actual data types
-         switch(datatype,'neurons','neurondesc','dist','basenoise','neurontype','params','noise','id','thresh'),#datatype descriptions
+                   self$thresh,self$base_noise), #actual data types
+         switch(datatype,'neurons','neurondesc','dist','basenoise','neurontype','params','noise','id','thresh','base_noise'),#datatype descriptions
          self$neurons[[stimno]]
   )
 }
@@ -3348,9 +3390,11 @@ addNoise.Neurons <-function(self,noiseparams=c(),stim=c(),op=1){
   #check where the noiseparameter is
   if(length(noiseparams)>0) noise <- noiseparams
   else noise <- self$noise
+  if(noise[[3]]==0) return(self) #no noise, so nothing to do
   stim.neurons <- self$neurons
   if(op==1 && length(stim) > 0) stimnos <- stim
   else stimnos <- 1:length(stim.neurons)
+  #cat('\nadd noise to N:',noise[[1]],'stim. ',stimnos)
   #go through eaach odor and to each neuron add 0-mean noise
   #cat('\naddnoise',stimnos,'stim',unlist(stim.neurons[1:2]),str(noise))
   res.neurons <- lapply(stimnos,function(i){
@@ -3360,7 +3404,7 @@ addNoise.Neurons <-function(self,noiseparams=c(),stim=c(),op=1){
     neuron
   })
   stim.neurons[stimnos] <- res.neurons
-  #cat('\nwith noise',unlist(stim.neurons[1:2]))
+  #cat('\nwith noise',noise[[3]],unlist(stim.neurons[1:2]))
   #names(res.neurons) <- names(self$neurons)
   neuron <- setData(self,val=stim.neurons,const.N$neurons)
 }
@@ -3371,6 +3415,7 @@ addNoise.ConnMatrix <-function(self,stimnos=c(),noiseparams=c()){
   #check where the noiseparameter is
   if(length(noiseparams)>0) noise <- noiseparams
   else noise <- self$noise
+  #cat('\nnoise to cm',self$type,':',noise[[3]])
   if(noise[[3]]==0) return(self) #no noise, so nothing to do
   #add 0-mean noie again
   origmat <- getData(self,const.CM$connmat)
@@ -3675,7 +3720,7 @@ genConnMat <- function(rows,cols,params=c(1,1.15,.16),type=3,noise=list(0,c(0,0)
   if(type==7 || type==8){#each source neurons makes "n_i" connections with each target, 
     #where n is derived from a Poisson distribution with mean "n" 
     #7: generate the synapses, 8 - use the vector specified in params for # synapses.
-    #cat('\noption',type,' : ',str(params))
+    #cat('\noption',type,' : ',str(params),'op',type-6)
     mat <- generateIndSynMatrices(target = rows,source = cols,params,op=type-6)
   }
   if(type==10){#fly al mb circuit
@@ -3729,7 +3774,7 @@ generateIndSynMatrices <-function(source,target,params=c(6,1,1.15,0.12),op=1){
     }
     #each source neuron makes nosyn synapses with the target neuron
     #so matrix with nosyn rows and source number of cols, params[-1] leaves out the first synapse
-    #cat('\tsy:',maxsyn,source,op)
+    #cat('\tsy:',maxsyn,source,op,'params',synpars[-(1:2)],'full par',synpars)
     mat <- matrix(genSynapses(maxsyn*source,distop=synpars[2],params = synpars[-(1:2)]),ncol = source)
     #fix it to have 0s where there are no synapses.
     mat_update <- updateSynMat(mat,nosyn)
@@ -3742,7 +3787,7 @@ generateIndSynMatrices <-function(source,target,params=c(6,1,1.15,0.12),op=1){
 #distop: 1 - gamma distibuteion of strngth, 2 - unform distibution of strength, 3 - all of them are the same strength
 #params: distribution parameters
 genSynapses<-function(no,distop=1,params=c(1.15,0.16),op=1){
-  #cat('\ngenSynapses no',no,' : ',distop)
+  cat('\ngenSynapses no',no,' : ',distop)
   if(no==0) return(0) #no synapses, so return 0.
   if(distop==1) strvec <- rgamma(no,shape=params[1],scale=params[2]) #gamma
   if(distop==2) strvec <- runif(no,min = params[1],max = params[2]) #uniform

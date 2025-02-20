@@ -292,6 +292,7 @@ fitpowlaw <- function(x,y,params=c(0,0),op=1){
          GetR2Custom(data.frame(log10(x),log10(y)),params=c(log10(params[1]),params[2])))
 }
 
+
 #will fit x and y vectors to a power law of the form y = a b^x, and will return a,b
 # and the model
 #return: the model fit.
@@ -302,13 +303,17 @@ fitexplaw <- function(x,y,params=c(1,1),op=1){
   #this works by taking log and converting to a log-log plot where the equation becomes
   # log10(y) = log10(a) +(b/log(10))*x, where cof1 = log10(a), cof2 = (b/log(10))
   #first fit the model
-  expmod <- lm(log10(y)~(x)) # logy = log(a) + x.log(b) 
+  posns <- c(clearVecInf(y),getVecNAInf(y)) #get the posns of y that are Inf 
+  vecy <- y[setdiff(1:length(y), posns)]
+  vecx <- x[setdiff(1:length(y), posns)]
+  #cat('\nbefore fitting exp',y,'cleared pos',posns,'vec',y[setdiff(1:length(y), posns)],'x',x,'e',length(posns))
+  expmod <- lm(log10(vecy)~(vecx)) # logy = log(a) + x.log(b) 
   cof <- coef(expmod)
-  #cat('coefficients are ',cof)
   slopvar <- names(cof)[2]
   cof[1] <- 10^cof[1] # so, a = 10^cof1
   cof[2] <- log(10)*cof[2] # and, b = log(10) * cof2
   names(cof) <- c('a','b')
+  
   switch(op,cof,expmod,summary(expmod),confint(expmod,slopvar,level = .95),
          GetR2Custom(data.frame(x,log10(y)),params=c(log10(params[1]),params[2]/log(10))))
   #GetR2Custom(data.frame(x,log10(y)),params=c(log10(cof[1]),cof[2]/log(10))))
@@ -347,15 +352,32 @@ fitexpolaw <- function(x,y,params=c(1,1),op=1){
 fitlinearlaw <- function(x,y,params=c(),op=1){
   #cat('\nfitlinearlaw',x,y)
   if(length(x)==0 || length(y)==0) return(c(F,F))
+  y <- unlist(y) #convert y to a vector if it is a DF
   #first fit the model
   linmod <- lm((y)~(x)) # y = ax + b 
   cof <- coef(linmod)
   slopvar <- names(cof)[2]
   names(cof) <- c('a','b')
   #GetR2Custom(data.frame(log10(x),log10(y)),params=c(log10(params[1]),params[2]))
-  switch(op,cof,linmod,summary(linmod),confint(linmod,slopvar,level = .95),
+  res <- switch(op,cof,linmod,summary(linmod),confint(linmod,slopvar,level = .95),
          GetR2Custom(data.frame(x,y),params=c(params[1],params[2])))
+  res
   #GetR2Custom(data.frame(x,y),params=c(cof[1],cof[2])))
+}
+
+#given a list of params, with each list item, will create the appropriate function
+#params.ls: the function parameters as a list 
+#op: 1, a power law function, 2 - linear function
+makeFnEqnList <- function(params.ls,op=1){
+  fn.ls <- switch(op,
+                  lapply(params.ls, function(y){#ax^b
+                    fn <- function(x) y[1]*x^y[2]
+                  }),
+                  lapply(params.ls, function(y){#ax + b
+                    fn <- function(x) y[1] + y[2]*x
+                  })
+  )
+  fn.ls
 }
 
 
@@ -501,6 +523,35 @@ genNoiseMatList <- function(matlst,noisedist=1,noise=0.1,noisetype=1,op=2){
 }
 
 
+# Function to calculate mean numerically from the CDF
+calculateMeanFromCDF <- function(cdf.fn, lower = -Inf, upper = Inf, step = 0.01) {
+  # Define the PDF as the derivative of the CDF
+  pdf.fn <- function(x) {
+    (cdf.fn(x + step) - cdf.fn(x)) / step  # Numerical differentiation
+  }
+  
+  # Numerical integration for the mean
+  mean.val <- integrate(function(x) x * pdf.fn(x), lower, upper)$value
+  return(mean.val)
+}
+
+#computes the mean from the CDF
+computeMeanCDF <- function(cdf.fn,lower,upper,no.steps=10,op=1){
+  step <- (upper-lower)/no.steps
+  range.probs <- sapply(seq(lower,upper,step),function(x) x*(cdf.fn(x+step) - cdf.fn(x) ) )
+  avg <- sum(range.probs)
+  avg
+}
+
+#computs the probability, given the CDF of a distribution
+#cdf.fn: is the cdf function
+#x: the value for which we need to calculate the probability, basically the x
+#delta: specifies the F(x+dx) - F(x). usually about 0.01 * mean
+computeProbCDF <- function(cdf.fn,x,delta,op=1){
+  prob <- cdf.fn(x+delta) - cdf.fn(x-delta)
+  prob
+}
+
 #finds the mean and variance from a CDF function by first calcualting the PDF
 #by usinga difference function
 #data: in CDF form, x,F(x)
@@ -582,6 +633,7 @@ FindMeanVarTopnCDFDf <-function(data.df,topn=5,op=1){
 #params: specified at the time of the call
 #dist: the distribution in question that is to be fitted
 #1 - normal, 2 - gamma, 3 - lognormal, 4 - exponential, 5 - uniform disttribution, 6 - top half normal distribution
+# 7 -mixture gaussian gamma model
 computeFitParams <-function(data,params=c(),dist=1){
   if(length(params)==0){
     res <- FindMeanVarCDF(data)
@@ -611,6 +663,17 @@ computeFitParams <-function(data,params=c(),dist=1){
     if(dist==6){#top half of normal distribution
       res1 <- 0.75 #assume you want the top 25th percentile
       res2 <- sdev #first guess
+    }
+    if(dist==7){#mixture gaussian gamma model
+      init.values <- c(
+        mu = mn,          # Initial guess for mean of Gaussian
+        sigma = sdev,         # Ensure sigma starts as a positive value
+        alpha = 2,               # Ensure alpha is positive
+        beta = 1 / mn,    # Ensure beta is positive
+        pi = 0.5                 # Initial mixing proportion
+      )
+      cat('\nfitparams',init.values)
+      return(init.values)
     }
     
     #cat('computefitparams',res1,res2,'\n')
@@ -647,6 +710,7 @@ statsFun <- function(dist=1,param,op=1){
 #input is the data, the distribution, param guesses
 #data: a vector of the data, if 2 cols, then data frame of Rel. Cum. Freq.
 #dist - 1, normal, 2 - gamma, 3 - lognormal, 4- exponential, 5 uniform, 6 - top half normal,
+#7 - gaussian gamma mixture model, 8, fit scubic spline, 9, Iso cubic spline
 #params: specifies a guess for the distribution fit, and if it is fittype=2, this is the one
 #used for plotting
 #graphparams: the gra[hical parameeters as a vector or list
@@ -666,24 +730,35 @@ NlsFitCDF <- function(data,dist=1,params=c(),graphparams=c(),fittype=1,markersiz
                  NlsFitLogNormalCDF(reldata,fitparams,op = fittype),
                  NlsFitExponentialCDF(reldata,fitparams,op = fittype),
                  NlsFitUniformCDF(reldata,fitparams,op = fittype),
-                 NlsFitTopNormalCDF(reldata,fitparams,op = fittype)
+                 NlsFitTopNormalCDF(reldata,fitparams,op = fittype),
+                 #NLSFitMixtureModelCDF(reldata,fitparams,op=fittype)
+                 NLSFitMixtureModelCDF(data,op=fittype),
+                 NLSFitSplineCDF(data,op=fittype),
+                 NLSFitIsoCDF(data,op=fittype)
   )
   #cat(str(fit))
   #resfit <- summary(fit)$coefficients #extract the best fit params
-  bestfit <- resfit[,1]
+  #cat('\nresfit',str(resfit),dist!=8 || dist!=9)
+  bestfit <- checkCond(dist<8,resfit[,1],resfit[[1]])
+  #bestfit <- resfit[,1]
+  #cat('\nbestfit',bestfit)
   names(bestfit) <- NULL # turn off the names since we need this in the fn call
   if (op ==1 ) return(bestfit) #if op=1, just return the fit params
   if (op ==3 ) return(resfit) #if op=3, just return the fits
   
-  if(fittype == 4) bestfit=params #if you want to plot the user defined params NlsFitTopNormalCDF
+  if(fittype == 4) bestfit <- params #if you want to plot the user defined params NlsFitTopNormalCDF
   #cat('best fit',bestfit,'\n')
   fnx <- function(x) switch(dist,do.call(pnorm,as.list(c(q=x,c(bestfit)))),
                             do.call(pgamma,as.list(c(q=x,shape=bestfit[1],scale=bestfit[2]))),
                             do.call(plnorm,as.list(c(q=x,c(bestfit)))),
                             do.call(pexp,as.list(c(q=x,c(bestfit)))),
                             do.call(punif,as.list(c(q=x,min=bestfit[1],max=bestfit[2]))),
-                            do.call(pnorm,as.list(c(q=x+bestfit[1],sd=c(bestfit[2])))) - pnorm(q=bestfit[1]) ) #subtract the CDF from the a'th percentile pdf.
-  plfn <- function(x) sapply(x,fnx) # so that it will apply to a vector
+                            do.call(pnorm,as.list(c(q=x+bestfit[1],sd=c(bestfit[2])))) - pnorm(q=bestfit[1]),  #subtract the CDF from the a'th percentile pdf.
+                            bestfit[5] * gaussian.cdf(x, bestfit[1], bestfit[2]) + 
+                              (1 - bestfit[5]) * gamma.cdf(x, bestfit[3], bestfit[4]),
+                            resfit[[2]]) 
+  plfn <- checkCond(dist < 8,function(x) sapply(x,fnx),resfit[[2]]) # so that it will apply to a vector
+  #plfn <- function(x) sapply(x,fnx) # so that it will apply to a vector
   if (op == 4) return(plfn) #return the plot fitting function
   #adds the user-specified params to the default ones
   graphpar <- c(list(reldata[,1],reldata[,2],plfn,fixy=c(0,1),markersize=markersize,
@@ -811,7 +886,7 @@ NlsFitGammaCDF <- function(data,params,op=1){
 
     fit <- nls(y~pgamma(x,shape = a,scale = b),
                start = list(a = params[1], b = params[2]),
-               lower = list(a = 0, b = .001),trace = F)
+               lower = list(a = 0, b = .001),trace = F,algorithm = 'port')
     fit <- summary(fit)$coefficients #return the fit coeeficients and errors
   }
   if(op==2 || op == 4){#method of moments
@@ -880,6 +955,206 @@ NlsFitTopNormalCDF <- function(data,params,op=1){
   fit
 }
 
+
+#given a vector does a fit to a nonlinear Mixture Gaussian Gamma model
+#vec is the data, a vector of values
+# Function to compute Gaussian CDF
+gaussian.cdf <- function(x, mu, sigma) {
+  pnorm(x, mean = mu, sd = sigma)
+}
+
+# Function to compute Gamma CDF
+gamma.cdf <- function(x, alpha, beta) {
+  pgamma(x, shape = alpha, rate = beta)
+}
+
+# Main function to fit a Gaussian-Gamma mixture model using relative cumulative frequency
+NLSFitMixtureMod.nls <- function(data) {
+  # Get relative cumulative frequencies using your function
+  rel.cum.freq.data <- RelCumFreq(vec)
+  x.vals <- rel.cum.freq.data[, 1] # Extract x values
+  rel.cum.freq <- rel.cum.freq.data[, 2] # Extract cumulative frequencies
+  
+  # Adjusted initial parameter estimates
+  init.values <- list(
+    mu = mean(vec),          # Initial guess for mean of Gaussian
+    sigma = sd(vec),         # Ensure sigma starts as a positive value
+    alpha = 2,               # Ensure alpha is positive
+    beta = 1 / mean(vec),    # Ensure beta is positive
+    pi = 0.5                 # Initial mixing proportion
+  )
+  
+  # Nonlinear least squares fitting function with adjusted bounds
+  fit.model <- nls(
+    formula = rel.cum.freq ~ (pi * gaussian.cdf(x.vals, mu, sigma)) + 
+      ((1 - pi) * gamma.cdf(x.vals, alpha, beta)),
+    start = init.values,
+    algorithm = "port",
+    lower = c(mu = -Inf, sigma = 0.01, alpha = 0.1, beta = 0.1, pi = 0.01),
+    upper = c(mu = Inf, sigma = Inf, alpha = Inf, beta = Inf, pi = 0.99)
+  )
+  
+  # Extract estimated parameters
+  params <- summary(fit.model)$parameters
+  return(params)
+}
+
+
+# Log-likelihood function for Gaussian-Gamma mixture model
+logLikelihoodNormGamma <- function(params, x, rel.cum.freq) {
+  mu <- params[1]
+  sigma <- params[2]
+  alpha <- params[3]
+  beta <- params[4]
+  pi <- params[5]
+  
+  # Calculate the combined CDF using the Gaussian and Gamma components
+  model.cdf <- pi * gaussian.cdf(x, mu, sigma) + (1 - pi) * gamma.cdf(x, alpha, beta)
+  
+  # Calculate the sum of squared errors for the fit to the cumulative frequencies
+  sse <- sum((model.cdf - rel.cum.freq)^2)
+  
+  # Add a penalty to discourage extreme pi values near 0 or 1
+  penalty <- 50 * (pi - 0.5)^2  # Adjust the factor 10 to control the strength of the penalty
+  
+  # Return negative of the likelihood plus the penalty to minimize in optim
+  return(sse + penalty)
+}
+
+# Function to fit a spline to the cumulative frequency data
+# vec: the vector or data you want to fit 
+NLSFitSplineCDF <- function(vec,fitparams=c(),op=1) {
+  # Get relative cumulative frequency data
+  rel.cum.freq.data <- RelCumFreq(vec)
+  x.vals <- rel.cum.freq.data[, 1]
+  cum.freq <- rel.cum.freq.data[, 2]
+  
+  # Adjust endpoints: add (min(x) - small value, 0) and (max(x) + small value, 1)
+  epsilon <- 1e-6 # A very small value for adjustment
+  x.adjusted <- c(min(x.vals) - epsilon, x.vals, max(x.vals) + epsilon)
+  cum.freq.adjusted <- c(0, cum.freq, 1)
+  
+  # Fit a cubic spline to the adjusted empirical CDF
+  spline.fit <- smooth.spline(x.adjusted, cum.freq.adjusted)
+  
+  # Define a function that uses the spline fit to evaluate the CDF at new points
+  cdf.spline <- function(x) {
+    y <- predict(spline.fit, x)$y
+    # Ensure that the values are bounded between 0 and 1
+    pmin(pmax(y, 0), 1)
+  }
+  # Return the fitted spline and the CDF function
+  list(spline.fit = spline.fit, cdf.spline = cdf.spline)
+}
+
+
+# Function to fit a monotonic CDF using isotonic regression
+NLSFitIsoCDF <- function(vec,fitparams=c(),op=1) {
+  # Get relative cumulative frequency data
+  rel.cum.freq.data <- RelCumFreq(vec)
+  x.vals <- rel.cum.freq.data[, 1]
+  cum.freq <- rel.cum.freq.data[, 2]
+  
+  # Fit an isotonic regression to ensure monotonicity
+  iso.fit <- isoreg(x.vals, cum.freq)
+  
+  # Define a function that uses the isotonic fit to evaluate the CDF at new points
+  cdf.iso <- function(x) {
+    y <- approx(iso.fit$x, iso.fit$y, xout = x, rule = 2)$y
+    # Ensure that the values are bounded between 0 and 1
+    pmin(pmax(y, 0), 1)
+  }
+  
+  # Return the fitted isotonic regression and the CDF function
+  list(iso.fit = iso.fit, cdf.iso = cdf.iso)
+}
+
+# Main function to fit a Gaussian-Gamma mixture model using relative cumulative frequency
+NLSFitMixtureModelCDF <- function(vec,fitparams=c(),op=1) {
+  if(length(fitparams)==0){
+    # Get relative cumulative frequencies using your function
+    rel.cum.freq.data <- RelCumFreq(vec)
+    x.vals <- rel.cum.freq.data[, 1] # Extract x values
+    rel.cum.freq <- rel.cum.freq.data[, 2] # Extract cumulative frequencies
+  } else {
+    x.vals <- vec[,1]
+    rel.cum.freq <- vec[,2]
+  }
+  # Initial parameter estimates
+  if (length(fitparams)==0) init.values <- c(
+    mu = mean(vec[vec < median(vec,na.rm = T)],na.rm = T),          # Initial guess for mean of Gaussian
+    sigma = sd(vec[vec < median(vec,na.rm = T)],na.rm = T),         # Ensure sigma starts as a positive value
+    alpha = 2,               # Ensure alpha is positive
+    beta = 1 / mean(vec,na.rm = T),    # Ensure beta is positive
+    pi = 0.5                 # Initial mixing proportion
+  ) else init.values <- fitparams
+  
+  #cat('\ninit.values',init.values)
+     
+  # Fit the model using optim
+  fit.model <- optim(
+    par = init.values,
+    fn = logLikelihoodNormGamma,
+    x = x.vals,
+    rel.cum.freq = rel.cum.freq,
+    method = "L-BFGS-B", # Bounded optimization method
+    lower = c(mu = -Inf, sigma = 0.01, alpha = 0.1, beta = 0.1, pi = 0.01),
+    upper = c(mu = Inf, sigma = Inf, alpha = Inf, beta = Inf, pi = 0.99),
+    control = list(fnscale = 1) # We multiply by -1 to maximize the likelihood
+  )
+  
+  # Extract the fitted parameters
+  fitted.params <- fit.model$par
+  #print(fit.model)
+  names(fitted.params) <- c("mu", "sigma", "alpha", "beta", "pi")
+ 
+  res <- cbind(fitted.params,fitted.params) 
+  res
+}
+
+
+# Function to calculate log-likelihood of a Gaussian fit
+logLikelihoodGaussian <- function(data) {
+  mu <- mean(data)
+  sigma <- sd(data)
+  sum(dnorm(data, mean = mu, sd = sigma, log = TRUE))
+}
+
+# Function to calculate log-likelihood of a Gamma fit
+logLikelihoodGamma <- function(data) {
+  fit <- fitdistrplus::fitdist(data, "gamma")
+  shape <- fit$estimate["shape"]
+  rate <- fit$estimate["rate"]
+  sum(dgamma(data, shape = shape, rate = rate, log = TRUE))
+}
+
+# Function to find the best change point
+findChangePoint <- function(vec, minCp = 180, maxCp = 300) {
+  vec <- cleanNAVec(vec)
+  bestCp <- NULL
+  bestLl <- -Inf
+  
+  for (cp in seq(minCp, maxCp, by = 1)) {
+    # Data before and after the candidate change point
+    dataBefore <- vec[vec <= cp]
+    dataAfter <- vec[vec > cp]
+    
+    # Calculate the combined log-likelihood
+    llGaussian <- logLikelihoodGaussian(dataBefore)
+    #llGamma <- logLikelihoodGaussian(dataAfter)
+    llGamma <- logLikelihoodGamma(dataAfter)
+    totalLl <- llGaussian + llGamma
+    
+    # Track the best change point
+    #cat('\ntat',totalLl,bestLl,llGamma,llGaussian,'\ncp',cp,dataBefore)
+    if (totalLl > bestLl) {
+      bestLl <- totalLl
+      bestCp <- cp
+    }
+  }
+  
+  return(list(bestCp = bestCp, bestLl = bestLl))
+}
 
 
 #check the goodness of fit for a distribution
@@ -1377,4 +1652,22 @@ computePrincipal <- function(s,n,ra,r=5,op=1){
     prin <- sp*((1+(i/100))^(nt+1-x))
   },ra,r,n)
   sum(tmp)
+}
+
+
+
+# Log-likelihood function for Gaussian-Gamma mixture model
+logLikelihoodNormGamma.old <- function(params, x, rel.cum.freq) {
+  mu <- params[1]
+  sigma <- params[2]
+  alpha <- params[3]
+  beta <- params[4]
+  pi <- params[5]
+  
+  # Calculate the combined CDF using the Gaussian and Gamma components
+  model.cdf <- pi * gaussian.cdf(x, mu, sigma) + (1 - pi) * gamma.cdf(x, alpha, beta)
+  
+  # Calculate the log-likelihood for the observed data
+  # We use sum of squared errors to fit to the cumulative frequencies
+  -sum((model.cdf - rel.cum.freq)^2)
 }

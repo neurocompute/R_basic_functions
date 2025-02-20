@@ -254,7 +254,9 @@ adjustTicks <- function(ticks,fix,roundxy,tickno,fixop=1,op=1){
 
 #this function, given x and y, generates yticks,xlabels, and nox
 #x and y: the data, rest of the var same as fplotlog
-genPlotVars <- function(x,y,rndfact=1,ticknox=2,ticknoy=2,fixy=1,fixx=1,fixop=1,logs=F,maxticks=10){
+#op: 1, figures out the x and y ranges, ticks, ...
+#op: 2, prespecified: through fixx, ticks by tickno.
+genPlotVars <- function(x,y,rndfact=1,ticknox=2,ticknoy=2,fixy=1,fixx=1,fixop=1,logs=F,maxticks=10,op=1){
   if(length(rndfact) > 1) {
     rndfactx = rndfact[1]
     rndfacty = rndfact[2]
@@ -262,6 +264,13 @@ genPlotVars <- function(x,y,rndfact=1,ticknox=2,ticknoy=2,fixy=1,fixx=1,fixop=1,
   else {
     rndfactx = rndfact
     rndfacty = rndfact
+  }
+  if(op==2){#prespecified options
+    #cat('\nop',2)
+    xrange <- fixx;yrange <- fixy
+    xticks <- seq(fixx[1],fixx[2],ticknox); yticks <- seq(fixy[1],fixy[2],ticknoy)
+    roundx <- rndfactx; roundy <- rndfacty
+    return(list(roundy,yrange,yticks,roundx,xrange,xticks))
   }
   options(scipen = 10)
   #find if logscale for both or just one
@@ -278,10 +287,11 @@ genPlotVars <- function(x,y,rndfact=1,ticknox=2,ticknoy=2,fixy=1,fixx=1,fixop=1,
   rangestats <- genRangeTicks(y,rndfact = rndfacty,tickno = ticknoy,fix=fixy,fixop=fixop,
                               logs = logsy,maxticks = maxticks)
   assignVarVals(c('roundy','yrange','yticks'),rangestats)
-  #cat('\nyticks',roundy,getNearestMutiple(min(y),roundy,1),getNearestMutiple(max(y),roundy,2)
+  # cat('\nyticks',roundy,getNearestMutiple(min(y),roundy,1),getNearestMutiple(max(y),roundy,2)
   #    ,yticks,'\n')
 
   #cat('rndfactx',rndfactx)
+  ##the same for the x-values
   rangestats <- genRangeTicks(x,rndfact = rndfactx,tickno = ticknox,fix=fixx,fixop=fixop,
                               logs = logsx,maxticks = maxticks)
   assignVarVals(c('roundx','xrange','xticks'),rangestats)
@@ -326,6 +336,8 @@ dropLine <- function(plotx,ploty,plottype,dropx,hline,plcolors,op=1){
 #7 - x and y are multiple columns, diff color for each x and y pair
 #8 - null plot for those instances for when we just want to see the fits.
 #9 - null plot. nothing to plot
+#10 - combination of a null plot, and plotting points given in pointset
+#cols: specifies the number of colulmns of data
 #hline: draws a horizontal line at the y position given by hline
 #vline: draws a vertical line at the x position(s) given by hline
 #dropx: each point is connected to hline by a thin line
@@ -336,12 +348,11 @@ fplottype <-function(plotx,ploty,factors=c(),cols,xrange,yrange,xlabel,ylabel,
   #cat("\nplottype",plottype)
   plsymbols <- c(21,2:20) #set the symbols for plotting
   #set the colors for plotting
-  plcolors <- c('black','red','blue','green','grey','magenta','yellow','brown','blueviolet','cadetblue',
-                'orange','darkcyan','darkgoldenrod1','darkorchid4','lightpink','orchid',
-                'purple','palevioletred','plum','slateblue') 
+  plcolors <- const.plcolors  
   #if markersize is at .15, we cant make the points smallewr without changing lwd, which we do proportionately decreasing it below 0.15
   if(markersize<0.15) linewidth <- 2 * (markersize/0.15)
   else linewidth <- 2
+  
   #dropLine testing
   if(plottype==1){
     plot(plotx,ploty,frame.plot = F,main = title, xlim = xrange,
@@ -442,7 +453,7 @@ fplottype <-function(plotx,ploty,factors=c(),cols,xrange,yrange,xlabel,ylabel,
     }
     #return(T)
   }
-  if(plottype==9){#null plot, no need to plot anything, but we still call plot for setting
+  if(plottype==9 || plottype==10){#null plot, no need to plot anything, but we still call plot for setting
     #up the plot, cex is set to 0 to get rid of points
     plot(xrange,yrange,frame.plot = F,main = title, xlim = xrange,
          ylim = yrange,pch=plsymbols[1],
@@ -452,8 +463,7 @@ fplottype <-function(plotx,ploty,factors=c(),cols,xrange,yrange,xlabel,ylabel,
   }
   
   #if there is a second set of points to be plotted
-  if (length(pointset)>0) { #the markersize is bigger for these points
-    #cat('pointsize',markersize*20,'\n')
+  if (plottype<10 && length(pointset)>0) { #the markersize is bigger for these points
     points(pointset[,1],pointset[,2],col=plcolors[1:length(ploty)],cex=pointsize,pch=plsymbols[15])
   }
   
@@ -471,8 +481,10 @@ fplottype <-function(plotx,ploty,factors=c(),cols,xrange,yrange,xlabel,ylabel,
 #logs: log scale
 #tickunit: at least for display, gives the units in which the axes should be displayed
 #if one number divides both axes. If two numbers then (xtickunit,ytickunit)
-#op= 1, labels are normal, 2 - labels have superscipts
-plotaxes <-function(xticks,yticks,xlabel='',ylabel='',logs=F,lgscale=10,tickunit=1,op=1){
+#op= 1, labels are normal, 2 - labels have superscipts,  op = 3, leave out the axes
+#gridop:0 - do not draw ticks and axis, just the tick nos, 1 - normal ticks and all
+plotaxes <-function(xticks,yticks,xlabel='',ylabel='',logs=F,lgscale=10,tickunit=1,gridop=1,op=1){
+  if(op==3) return(T) #no need to plot the axes
   #do axis labels, line species the distance from axis, las the orientation
   #mtext(text=parse(text=ylabel),side=2,las=0,cex=1.2,font=2,line=4.2,lwd=2)#parse for superscripts
   mtext(text=getStringExp(ylabel),side=2,las=0,cex=1.2,font=2,line=5.2,lwd=2) #y-axus
@@ -502,19 +514,20 @@ plotaxes <-function(xticks,yticks,xlabel='',ylabel='',logs=F,lgscale=10,tickunit
 
   #y axis labels
   yticks.display <- yticks/unity
-  axis(side=2,at=yticks,labels=rep("",length(yticks)),mgp=c(4,1,1),lwd=2)
+  #axis(side=2,at=yticks,labels=rep("",length(yticks)),mgp=c(4,1,1),lwd=2)
+  axis(side=2,at=yticks,labels=rep("",length(yticks)),mgp=c(4,1,1*gridop),lwd=2*gridop,lwd.ticks = 2*gridop)
   if (logsy) mtext(text=parse(text=paste(lgscale,"^",yticks,sep = '')),
         ,side=2,at=yticks,las=1,cex=1.2,font=2,line=1.75)
   else mtext(text=as.character(yticks.display),
-             ,side=2,at=yticks,las=1,cex=1.2,font=2,line=1.75)
+             ,side=2,at=yticks,las=1,cex=1.2,font=2,line=1.75*gridop)
   #do the x axis labels
   xticks.display <- xticks/unitx
-  axis(side=1,at=xticks,labels=rep("",length(xticks)),mgp=c(3,1,.75),lwd=2)
+  axis(side=1,at=xticks,labels=rep("",length(xticks)),mgp=c(3,1,.75*gridop),lwd=2*gridop,lwd.ticks = 2*gridop)
   #cat('ticks',xticks,yticks)
   if (logsx) mtext(text=parse(text=paste(lgscale,"^",xticks,sep = '')),
                   ,side=1,at=xticks,las=1,cex=1.2,font=2,line=1.75)
   else mtext(text=as.character(xticks.display),
-             ,side=1,at=xticks,las=1,cex=1.2,font=2,line=1.75)
+             ,side=1,at=xticks,las=1,cex=1.2,font=2,line=1.75*gridop)
   T
 }
 
@@ -582,7 +595,6 @@ processPlotXY <-function(x,y,logs=F,lgscale=10,rndfact=1,ticknox=2,ticknoy=2,fix
         plotx <- lapply(x,function(item) item[[1]]);ploty <- lapply(x,function(item) item[[2]])  
       }
       else {#matrix or DF
-        #cat('\n',str(x))
         plotx <- lapply(x,function(item) item[,1]);ploty <- lapply(x,function(item) item[,2])  
       }
     }
@@ -604,17 +616,18 @@ processPlotXY <-function(x,y,logs=F,lgscale=10,rndfact=1,ticknox=2,ticknoy=2,fix
   }
   if(logsx || logsy){#if x or y axis should be logscale
     #if x is a list it means the data is a list of x and y vectors
-    if (typeof(x) == typeof(list())){
+    if (isDataType(x) == const.DataType$list){
       if(logsx){
         allx <- log(allx,lgscale)
-        if(isDataType(x)==3) plotx <- lapply(x,function(x) log(x[,1],lgscale))    
-        if(isDataType(x)==4) plotx <- lapply(x,function(x) log(x[[1]],lgscale))    
+        if(isDataType(x[[1]])==const.DataType$dataframe) plotx <- lapply(x,function(item) log(item[,1],lgscale))    
+        if(isDataType(x[[1]])==const.DataType$list) plotx <- lapply(x,function(item) log(item[[1]],lgscale))    
       }
       if(logsy){
         ally <- log(ally,lgscale)
-        ploty <- lapply(x,function(x) log(x[,2],lgscale))  
-        if(isDataType(x)==3) ploty <- lapply(x,function(x) log(x[,2],lgscale))    
-        if(isDataType(x)==4) plotx <- lapply(x,function(x) log(x[[2]],lgscale))    
+        #cat('\n',str(ally),'\n',str(x),'\ny',str(y))
+        #ploty <- lapply(x,function(item) log(item[,2],lgscale))  
+        if(isDataType(x[[1]])==const.DataType$dataframe) ploty <- lapply(x,function(item) log(item[,2],lgscale))    
+        if(isDataType(x[[1]])==const.DataType$list) ploty <- lapply(x,function(item) log(item[[2]],lgscale))    
       }
     }
     else {#x and y specify x and y values
@@ -654,19 +667,21 @@ processPlotXY <-function(x,y,logs=F,lgscale=10,rndfact=1,ticknox=2,ticknoy=2,fix
 #aspect: the y to x aspect of the plot, 1 - equal x and y, .5 would be y axis is half of x
 #size: size of the panel for the graph. 1 is normal, andd 2 is double the size, 2.2 could be max
 #tickunit: at least for display, gives the units in which the axes should be displayed
-#if one number divides both axes. If two numbers then (xtickunit,ytickunit)#hline: draws a horizontal line at the y position given by hline
+#if one number divides both axes. If two numbers then (xtickunit,ytickunit)
+##hline: draws a horizontal line at the y position given by hline
 #vline: draws a vertical line at the x position given by vline
 #dropx: each point is connected to hline by a thin line
 #pointset: the second set of points to be plotted. They are (vecx,vecy) format, or c()
 #pointsize: soize of the pointset 
-#logs: logscale or not, F - not logscle, or (T,F) - log for x axis, not for Y. and the 3 other combinations.
+#logs: log scale or not, F - not logscle, or (T,F) - log for x axis, not for Y. and the 3 other combinations.
+#axesop= 1, labels are normal, 2 - labels have superscipts,  op = 3, leave out the axes
 #op=1, normal data x and y, =2 plot equations for a range of x. No Y specified,
 #op=3, plot all the normal data but plot just one of the equations
 fploteq <- function(x,y=c(),eq=F,xlabel='x',ylabel='y',title='',
                     markersize=1.2,logs=F,lgscale=10,factors=c(),rndfact=1,ticknox=1,ticknoy=1,
                     fixy=1,fixx=1,fixop=2,plottype=c(),digits=3,full=T,stddev=c(),stdorient=1,
                     stdthick=3,stdepsilon=0.4,aspect=1,size=1,tickunit=1,hline=c(),vline=c(),dropx=F,
-                    pointset=c(),pointsize=2,op=1){
+                    pointset=c(),pointsize=2,axesop=1,op=1){
   #write function to figure out default vector or data frame
   #process the X and y data to get the plot and allx and ally values
   #cat(str(x),y,op,str(eq),'\n')
@@ -684,7 +699,7 @@ fploteq <- function(x,y=c(),eq=F,xlabel='x',ylabel='y',title='',
   tmp <- genPlotVars(allx,ally,rndfact,ticknox,ticknoy,fixy,fixx,fixop=fixop,logs = logs)
   assignVarVals(c('roundy','yrange','yticks','roundx','xrange','xticks'),tmp)
   
-  cat('range x:',xrange,',',xticks,',y:',yrange,',',yticks,'\n')
+  cat('\nrange x:',xrange,',',xticks,',y:',yrange,',',yticks,'\n')
   #par(mar=c(2,5,2,4)) #adjust the outer and inner marggines
   #if (op==2) plot(xrange,yrange)
   par(oma=c(4,4,2,4))
@@ -693,7 +708,7 @@ fploteq <- function(x,y=c(),eq=F,xlabel='x',ylabel='y',title='',
   par(pin=c(xysize,xysize*aspect),xpd=NA) #adjust size of the display parametrized by aspect, cex=1.5
   
   #redundant:if((length(ploty)==1) && (length(plottype)==0)) plottyp <- 1 #only 1 column to plot
-  cols <- 0
+  cols <- 0 #liam check this. What is the point of having it as a parameter if you do not use it.
   if(length(plottype)==0) {#if no plottype specified, choose default options for 1/2 cols
     if(typeof(ploty)==typeof(list())) {
       if(typeof(plotx)==typeof(list())) plottyp <- 7 #both x and y are lists
@@ -708,7 +723,7 @@ fploteq <- function(x,y=c(),eq=F,xlabel='x',ylabel='y',title='',
   else plottyp <- plottype
   cat('plottype',plottyp,'\t')
   fplottype(plotx,ploty,factors=factors,cols=cols,xrange=xrange,yrange=yrange,xlabel=xlabel,
-            ylabel,markersize=markersize,
+            ylabel = ylabel,markersize=markersize,
             title = title,plottype = plottyp,dropx = dropx,hline = hline,vline=vline,pointset = pointset)
   #do the stddev
   if(length(stddev) > 0)  plotmeansd(noxlabels=x,means=y,std=stddev,epsilon = stdepsilon,linethick = stdthick*markersize/1.75,
@@ -731,8 +746,323 @@ fploteq <- function(x,y=c(),eq=F,xlabel='x',ylabel='y',title='',
   drawMiscOptions()
   #needed: yticks, xlabels,nox
   #do the x and y axis labels
-  plotaxes(xticks,yticks,xlabel=xlabel,ylabel=ylabel,logs=logs,lgscale = lgscale,tickunit = tickunit)
+  plotaxes(xticks,yticks,xlabel=xlabel,ylabel=ylabel,logs=logs,lgscale = lgscale,tickunit = tickunit,op=axesop)
 }
+
+#function plots a series of points given as either a list of points or as x and y vectors of points
+#grid: provies the grid params: list(start,end,xwidth,ywidth,col,thickness,shade,gridop)
+#segop specifices how the line segments should be joined
+#segop: 1, join one point tothe next
+#2: join the points according to the swc file
+#3: is a data frame, with the columns, pt1.x,pt1.y;pt2.x,pt2,y,thickness
+#4: pts is a data frame, with the columns, pt1.x,pt1.y;pt2.x,pt2,y,thickness, draw a grid
+#5: SWC file given as a data frame, with the column names specifying x,y, and parent
+#6: added to 6, draw a grid, too
+#7: like 6, draw a grid, but the axes are now labelled like a grid form, so just the axes.
+#The following are pre-specified for segop=7: 
+#grid size from fixx and fixy, width of the ticks from ticknox and y
+# segthick: thickness of line segment
+# thick.factor: scales the line representation thickness to the thickness you want: 1: defauly
+# gridop: 1 - regular axes, 2: noaxes, only ticks
+fplotpts <- function(x,y=c(),eq=F,xlabel='x',ylabel='y',title='',
+                    markersize=1.2,logs=F,lgscale=10,factors=c(),rndfact=1,ticknox=1,ticknoy=1,
+                    fixy=1,fixx=1,fixop=2,plottype=c(1),digits=3,full=T,stddev=c(),stdorient=1,
+                    stdthick=3,stdepsilon=0.4,aspect=1,size=1,tickunit=1,hline=c(),vline=c(),dropx=F,
+                    pointset=c(),pointsize=2,swc=c(),grid=list(),segop=1,segthick=0.2,thick.factor=1,gridop=1,op=1){
+  #write function to figure out default vector or data frame
+  #process the X and y data to get the plot and allx and ally values
+  #cat(str(x),y,op,str(eq),'\n')
+  vecx <- x
+  if(op==2){#only want curves need y points to figure axis, get all the y points
+    vecy <- getEqnPoints(x=x,eq = eq)
+    #cat('\n the y points:',vecy)
+  }
+  else vecy <- y
+  #cat('\nextreme',getExtrema(x),getExtrema(y))
+  tmp <- processPlotXY(vecx,vecy,logs = logs,lgscale = lgscale,ticknox = ticknox,
+                       ticknoy = ticknoy,fixy = fixy,fixx = fixx)
+  assignVarVals(c('allx','ally','plotx','ploty'),tmp)
+  #calculate all the plot variables
+  tmp <- genPlotVars(allx,ally,rndfact,ticknox,ticknoy,fixy,fixx,fixop=fixop,logs = logs,op=ifelse(segop==7,2,1))
+  assignVarVals(c('roundy','yrange','yticks','roundx','xrange','xticks'),tmp)
+  
+  cat('range x:',xrange,',',xticks,',y:',yrange,',',yticks,'\n')
+  #par(mar=c(2,5,2,4)) #adjust the outer and inner marggines
+  #if (op==2) plot(xrange,yrange)
+  par(oma=c(4,4,2,4))
+  par(font.axis = 2) #make axes bold again, Haha!
+  xysize <- 2.5 * size
+  par(pin=c(xysize,xysize*aspect),xpd=NA) #adjust size of the display parametrized by aspect, cex=1.5
+  
+  #to do: plot an imaginary point right in the middle of xrange and yrange, and then just plot all points and 
+  #decide whetehr you should join them or not.
+  
+  ptset <- cbind(plotx,ploty)
+  #cat('\nplotx',str(plotx),str(ptset),'\t')
+  
+  fplottype(plotx,ploty,factors=factors,cols=cols,xrange=xrange,yrange=yrange,xlabel=xlabel,
+            ylabel,markersize=markersize,
+            title = title,plottype = plottype,dropx = dropx,hline = hline,vline=vline,pointset = pointset)
+  cat('\nplottype:',plottype)
+  fsegop <- checkCond(segop==7,6,segop)
+  fgrid <- checkCond(length(grid)==0 || segop==7,list(origin=c(fixx[1],fixy[1]),topr=c(fixx[2],fixy[2]),
+                                                      xwidth=ticknox,ywidth=ticknoy,thickness=segthick),grid)
+  fplotseg(lapply(1:length(plotx), function(i) c(plotx[i],ploty[i])),swc = swc,thick=segthick,thick.factor = thick.factor,
+           op=fsegop,grid = fgrid)
+  
+  #do the stddev
+  if(length(stddev) > 0)  plotmeansd(noxlabels=x,means=y,std=stddev,epsilon = stdepsilon,linethick = stdthick*markersize/1.75,
+                                     markersize = 0.2*markersize,orient = stdorient,logs = logs,lgscale=lgscale,op=2)
+
+  #check if a function or list of functions has been specified, if not skip equation fitting
+  #if(plottyp==8) eqplotcolor <- 2 #the plot color is black for all curves on grey point background
+  #else eqplotcolor <- 1
+  eqplotcolor <- 1
+  if (typeof(eq) == typeof(function(x) x) || typeof(eq) == typeof(list(1))) 
+    plotcurves(eq,minx = min(allx),maxx=max(allx),logs = logs,lgscale = lgscale,
+               xrange = xrange,yrange = yrange,full = full,plotcolor = eqplotcolor)
+  #extra stuff to be drwan like joining the point to an imaginary line
+  drawMiscOptions()
+  #needed: yticks, xlabels,nox
+  #do the x and y axis labels
+  plotaxes(xticks,yticks,xlabel=xlabel,ylabel=ylabel,logs=logs,lgscale = lgscale,tickunit = tickunit,gridop = gridop)
+}
+
+
+#function plots segments that join the list of points specified by options
+#thick: how thick the joining line segments should be
+#pts: the points to be plotted, passed as a list or DF depending on the option
+#xylimits: the x and y limits of the plot to be drawn, specified as list(bottom left pt, top right pt)
+#xlabel and ylabal: x and y-axis labels
+#op: 1, join one point tothe next
+#2: join the points according to the swc file
+#2.5: just join a subset of the points, specified by swc.set = c(indices to be plotted): actually don't need this
+#3: is a data frame, with the columns, pt1.x,pt1.y;pt2.x,pt2,y,thickness
+#4: pts is a data frame, with the columns, pt1.x,pt1.y;pt2.x,pt2,y,thickness, draw a grid
+#5: SWC file given as a data frame, with the column names specifying x,y, and parent
+#6: added to 6, draw a grid, too
+#7: like 6, draw a grid, but the axes are now labelled like a grid form, so just the axes.
+#swc: is the in the format list(swc col1,swc_col7,swc_col6) : index,thickness,parent will also work for df
+#for rescaled matrix it is col. 1, 6, 5
+#grid: provies the grid params: list(start,end,xwidth,ywidth,col,thickness,shade,gridop)
+#cols: cols to choose for plotting for op=3 and 4
+#plotop: 1 : this is a subroutine of a larger routine, so just do the plotting
+# 2: do the plot between the prescirbed limits over here. bottom left to top right based on xylimits
+# thick.factor: scales the line representation thickness to the thickness you want: 1: defauly
+fplotseg <- function(pts,swc=c(),thick=0.2,xylimits=c(),cols=c(),grid=list(),xlabel='',ylabel='',thick.factor=1,plotop=1,op=1){
+  cat('\nfplotseg',length(pts),thick)
+  if(op==0) return (T) # do nothing
+  if(plotop == 2) {
+    plot(xylimits[[1]],xylimits[[2]],axes=F,frame.plot=F,xlim=c(xylimits[[1]][1],xylimits[[2]][1]),
+         ylim=c(xylimits[[1]][2],xylimits[[2]][2]),xlab='',ylab='',type = 'n')
+    if(length(grid)>0)  plotaxes(seq(xylimits[[1]][1],xylimits[[2]][1],grid[[3]]),
+                                 yticks=seq(xylimits[[1]][2],xylimits[[2]][2],grid[[4]]),
+                                 xlabel=xlabel,ylabel=ylabel,tickunit = 1,gridop = 0)
+  }
+  if(op==1){#join each of the vertices in the order given
+    for(i in seq_wrap(2,length(pts))){
+      #if(i %% 400 == 0) cat('\t i:',pts[[i]])
+      lines(x = c(pts[[i-1]][1],pts[[i]][1]), y = c(pts[[i-1]][2],pts[[i]][2]), col = "red", lwd = 0.2)
+    }
+  }
+  
+  if(op==2){#join the vertices in a tree format specific by the swc parent variable 
+    #cat('\nswc',str(swc))
+    for(i in seq_wrap(2,length(swc[[1]]))){
+      #if(i %% 400 == 2) cat('\t i:',pts[[i]],swc[[1]][i],swc[[2]][i])
+      if ( swc[[2]][i] > 0) {#check if the coordinates are not 0 and parent is not -1
+        pt1 <- swc[[2]][i]-1; pt2 <- swc[[1]][i] - 1 #since we are skipping the first point
+        #if(i %% 400 == 2) cat(' pts',i,pt1,pt2,pts[[pt1]],pts[[pt2]])
+        lines(x = c(pts[[pt1]][1],pts[[pt2]][1]), y = c(pts[[pt1]][2],pts[[pt2]][2]), col = "red", lwd = thick)
+      }
+    }
+  }
+  
+  if(op==3 || op==4){#pts is a data frame, with the columns, pt1.x,pt1.y;pt2.x,pt2,y,thickness
+    #cat('\n',str(pts))
+    if(op==4 && length(grid) > 0){
+      #cat('\n',str(grid))
+      do.call(drawGrid,grid)
+      # drawGrid(origin = grid[[1]],end=grid[[2]],xwidth = grid[[3]],ywidth = grid[[4]],thickness = grid[[5]],col=grid[[6]],
+      #           shade = grid[[7]],op=grid[[8]])
+    }
+    #cat('\n pts',length(pts),isDataType(pts),'nrow',nrow(pts))
+    for(i in seq_wrap(1,nrow(pts)) ){
+      #if(i<10) cat('\ni:',c(pts[i,1],pts[i,4]),':',c(pts[i,2],pts[i,5]) )
+      lines(x = c(pts[i,1],pts[i,4]), y = c(pts[i,2],pts[i,5]), col = "red", lwd = thick)
+    }
+  }  
+
+  if((op==5) || (op==6) || (op==7)){#join the vertices in a tree format specific by swc, swc given as a DF
+    #cat('\nswc',nrow(swc),'grid',length(grid),op)
+    if((op==6 || op==7) && length(grid) > 0){
+      do.call(drawGrid,grid)
+    }
+    for(i in seq_wrap(2,nrow(swc))){
+      pt1 <- c(swc[i,'x'],swc[i,'y'])
+      parent.ind <- swc[i,'parent']; thickness <- swc[i,'thick']
+      parent.row <- getSWCpos(swc,index = parent.ind); parent.pt <- c(swc[parent.row,'x'],swc[parent.row,'y'])
+      #pt1 <- swc[[2]][i]-1; pt2 <- swc[[1]][i] - 1 #since we are skipping the first point
+      #if(i %% 10 == 0) cat('\t i:',i,thickness)
+      #cat('\nthicknes fplotseg:',thickness*thick.factor)
+      lines(x = c(pt1[1],parent.pt[1]), y = c(pt1[2],parent.pt[2]), col = "red", lwd = thickness*thick.factor)
+    }
+  }
+  
+
+}
+
+
+#function that given a plot will draw a grid 
+#start and end, are the start and end points of the grid
+#xwifth and ywidth define the plot limits
+#thickness: of the grid lines
+#col: color of the lines to be drawn
+#shade: shading the overall area
+#topr: the top right point, counterpoint tothe origin
+#plotop: 1 : this is a subroutine of a larger routine, so just do the plotting
+# 2: do the plot between the prescirbed limits over here. bottom left to top right based on xylimits
+#op: 0, for testing, plot an empty plot first
+#op: 1, the widths are fixed and given
+#op: 2: x and y widths specify the number of divisions for the grid
+drawGrid <- function(origin,topr,xwidth,ywidth,thickness,col='grey',shade='',xlabel='',ylabel='',
+                     plotop=1,op=1){
+  #check dconditions
+  box.width <- topr - origin
+  if(plotop == 2) {
+    #cat('\n',origin,topr)
+    plot(origin,topr,axes=F,frame.plot=F,xlim=c(origin[1],topr[1]),
+         ylim=c(origin[2],topr[2]),xlab='',ylab='',type = 'n')
+    if(length(grid)>0)  plotaxes(seq(origin[1],topr[1],xwidth),
+                                 yticks=seq(origin[2],topr[2],ywidth),
+                                 xlabel=xlabel,ylabel=ylabel,tickunit = 1,gridop = 0)
+  }
+  if (op ==1 && !all(c((box.width[1] %% xwidth == 0),(box.width[2] %% ywidth == 0))) ){
+    cat('\nerror in widths')
+    return(F)
+  }
+  if(op==0) fplottype(plotx=origin,ploty=topr,xrange=c(origin[1],topr[1]),yrange=c(origin[2],topr[2]),
+            xlabel=xlabel,ylabel=ylabel,plottype = 9)
+  #now, draw the shaeded rectangle
+  transp.color <- adjustcolor(lighten('grey',factor = 20),alpha.f = 0.3)
+  if(length(shade)>0) rect(origin[1],origin[2],topr[1],topr[2],col = transp.color,border = NA)
+  
+  #generate the x and y coordinates of all horizontal lines
+  no.grids <- box.width/c(xwidth,ywidth) #reversed as changing xwidth means changing no of vertical lines & vice-versa
+  #cat('\nnogrids',no.grids,'box width',box.width,'\n')
+  horz.pts <- sapply(1:(no.grids[2]-1), function(i){
+    #draw horizontal lines starting from the bottom most line, y =0
+    lines(x = c(origin[1],topr[1]), y = c(origin[2] + ywidth*i,origin[2] + ywidth*i), col = col, lwd = 1)
+    #cat('\ty:',c(origin[2] + ywidth*i,origin[2] + ywidth*i),'x:',c(origin[1],topr[1]))
+  })
+  
+  #cat('\ndone with horz')
+  vert.pts <- sapply(1:(no.grids[1]-1), function(i){
+    #draw horizontal lines starting from the bottom most line, y =0
+    lines(x = c(origin[1] + xwidth*i,origin[1] + xwidth*i), y = c(origin[2],topr[2]), col = col, lwd = 1)
+    #cat('\tx:',c(origin[1] + xwidth*i,origin[1] + xwidth*i),'y:',c(origin[2],topr[2]))
+  })
+}
+
+#function that will draw box of shaded grids
+#grid.mat: grid matrix with each entry some number will shade the squares/rectangles according to the relative values
+#in each grid
+#xwifth and ywidth define the plot limits
+#thickness: of the grid lines
+#col: color of the lines to be drawn
+#shading: the shading color palette, default: const.plblcolors
+#shade: shading the overall area
+#topr: the top right point, counterpoint tothe origin
+#plotop: not sure: 1 : this is a subroutine of a larger routine, so just do the plotting
+# 2: do the plot between the prescirbed limits over here. bottom left to top right based on xylimits
+#op: 0, for testing, plot an empty plot first
+#op: 1, the widths are fixed and given
+#op: 2: x and y widths specify the number of divisions for the grid
+drawShadedGrid <- function(grid.mat,origin,topr,xwidth,ywidth,thickness,col='grey',shading=const.plbluecols,shade='',
+                           xlabel='',ylabel='',plotop=1,op=1){
+  #check dconditions
+  box.width <- topr - origin
+  if(plotop == 2) {
+    #cat('\n',origin,topr)
+    plot(origin,topr,axes=F,frame.plot=F,xlim=c(origin[1],topr[1]),
+         ylim=c(origin[2],topr[2]),xlab='',ylab='',type = 'n')
+    #cat('\ngrid',gridop)
+    plotaxes(seq(origin[1],topr[1],xwidth),yticks=seq(origin[2],topr[2],ywidth),
+             xlabel=xlabel,ylabel=ylabel,tickunit = 1,gridop = 0)
+  }
+  if (op ==1 && !all(c((box.width[1] %% xwidth == 0),(box.width[2] %% ywidth == 0))) ){
+    cat('\nerror in widths')
+    return(F)
+  }
+  if(op==0) fplottype(plotx=origin,ploty=topr,xrange=c(origin[1],topr[1]),yrange=c(origin[2],topr[2]),
+                      xlabel=xlabel,ylabel=ylabel,plottype = 9)
+  #now, draw the shaeded rectangle
+  transp.color <- adjustcolor(lighten('grey',factor = 20),alpha.f = 0.3)
+  if(length(shade)>0) rect(origin[1],origin[2],topr[1],topr[2],col = transp.color,border = NA)
+  
+  #generate the x and y coordinates of all horizontal lines
+  no.grids <- box.width/c(xwidth,ywidth) #reversed as changing xwidth means changing no of vertical lines & vice-versa
+  #cat('\nnogrids',no.grids,'box width',box.width,'\n')
+  horz.pts <- sapply(1:(no.grids[2]-1), function(i){
+    #draw horizontal lines starting from the bottom most line, y =0
+    lines(x = c(origin[1],topr[1]), y = c(origin[2] + ywidth*i,origin[2] + ywidth*i), col = col, lwd = 1)
+    #cat('\ty:',c(origin[2] + ywidth*i,origin[2] + ywidth*i),'x:',c(origin[1],topr[1]))
+  })
+  
+  #cat('\ndone with horz')
+  vert.pts <- sapply(1:(no.grids[1]-1), function(i){
+    #draw horizontal lines starting from the bottom most line, y =0
+    lines(x = c(origin[1] + xwidth*i,origin[1] + xwidth*i), y = c(origin[2],topr[2]), col = col, lwd = 1)
+    #cat('\tx:',c(origin[1] + xwidth*i,origin[1] + xwidth*i),'y:',c(origin[2],topr[2]))
+  })
+  
+  #calcaluate the relative color densities. 
+  col.mat <- matrix(computeShapesDensityColor(grid.mat,shades = shading),ncol = ncol(grid.mat),nrow = nrow(grid.mat))
+  colmap.mat <- mapGrid2Mat(dim(col.mat),grid.size = topr,grid.width = c(xwidth,ywidth))
+  assignVarVals(c('matx','maty'),colmap.mat)
+  #now color the shaded grids accodingly.
+  #cat('\n',seq(origin[1],topr[1]/xwidth))
+  for (i in seq_wrap(1,topr[1]/xwidth)) {
+    for (j in seq_wrap(1,topr[2]/ywidth)) {
+      #cat('\n ij',i,j,'->',matx[i,j],maty[i,j])
+      rect(matx[i,j],maty[i,j],matx[i,j]+xwidth,maty[i,j]+ywidth,col = col.mat[i,j],border = NA)
+      #rect(i,j,i+xwidth,j+ywidth,col = col.mat[i/xwidth+1,j/ywidth+1],border = NA)
+    }
+  }
+  #cat('\n')
+  #col.mat
+}
+
+#function that given a matrix or array size and grid parameters, will map the grid boxes 
+#to the matrix coordinates
+#matsize is given (nrows,ncols)
+#grid is 0 based
+#mat is 1 based 
+mapGrid2Mat <- function(matsize,grid.size,grid.width,op=1){
+  grid.par <- grid.size/grid.width
+  matx <- matrix(rep(0,prod(matsize)),nrow=matsize[1],ncol = matsize[2])
+  maty <- matrix(rep(0,prod(matsize)),nrow=matsize[1],ncol = matsize[2])
+  for (i in seq_wrap(1,grid.par[1])) {
+    #cat('\n')
+    for (j in seq_wrap(1,grid.par[2])) {
+      matx[i,j] <- (j-1)*grid.width[2]
+      maty[i,j] <- (grid.par[1]-i)*grid.width[1]
+      #cat('ij',i,j,':',(j-1)*grid.width[2],(grid.par[1]-i)*grid.width[1],'\t')
+    }
+  }
+  list(matx,maty)
+}
+
+
+#this function plots all kinds of grids. A little different from fplot, in that the grids and hencece the
+#ticks are prespecified. Maybe, we can subsitute fploteq axes at some points as one of the options.
+fplotgrids<-function(pts,widths,op=1){
+  
+  
+}
+
+
+
 
 #empty function for now
 #extra stuff to be drwan like joining the point to an imaginary line
@@ -911,6 +1241,7 @@ plotStripAxes <-function(xticks,yticks,xcat=T,xlabel='',ylabel='',logs=F,lgscale
   else valy <- yticksnew
   ypos <- valy[1] - (valy[length(valy)]-valy[1])/5 #ypos <- par("usr")[3] #original val 
   #the x-axis labels
+  #cat('\nplotstripaxes',nox,'xlable',xlabel,'xlabs',xlabs,'xcat',xcat,'ticks',xticks,':',yticks)
   if (angle) text(x=nox,ypos,srt=45,adj=1,labels = xlabs,xpd=T,
                   las=1,cex=1.2,font=2)#,pos=1,offset = 2)
   else mtext(text=xticksnew,side=sidex,at=nox,las=1,cex=1.2,font=2,line=1.25)
@@ -1001,7 +1332,8 @@ fstripchart <-function(data.df,methodstr='jitter',rndfact=1,ticknoy=1,fixy=1,lgs
 }
 
 #this function draws a stripchart with a more minimalist axes
-#data.lst: the data input is a list of data frames rather than a single one
+#data.lst: can be one of several things: one it can be a nested list: list of lists
+#could also be a list of data frames rather than a single one
 #data.lst is a data frame where the columsn are vectors of the different elements to be plotted. 
 #methodstr: for ex: jitter, overplot, or stack
 #rndfact: the nearest power of 10 mulitiplied by rndfact, for example 5 * 1000
@@ -1015,13 +1347,15 @@ fstripchart <-function(data.df,methodstr='jitter',rndfact=1,ticknoy=1,fixy=1,lgs
 #flipaxis: 1 - as it is, 2 - the y-axis becomes the x-axis
 #stretchx: the amount by which to stretch the x-axis. the default is 5x. To nullify, do 0.2
 #col: adds color to the various points of the plot. Mainly matters when we have a list.
+#datcol: 0 - do nothing, 1 - data is in the form of a data frame, each row is the same type of elem, like species, and the
+#columns are values for different variables, like cell types. Each species in a row along the column should be a different color.
+#But, a species along should be the same color across the columns. 
 #ticklabels: specifies the strings for the xticks, if not specified, take the cue from data.lst
-#op =1 default, 2 - print se and means
-fstripchartvecs <-function(data.lst,methodstr='jitter',markersize=1.2,rndfact=1,lgscale=10,
-                           logs=F,tickno=2,fixy=1,angle=T,sem=1,semthick=2,xlabel='',ylabel='',ticklabs=c(),markersizemean=markersize,
-                           xcat=T,orient=1,pairplot=0,flipaxis=1,stretchx=1,col=F,op=1){
+#op =1 default, 2 - print se and means, 3 - only print means and sem
+fstripchartvecs <-function(data.lst,methodstr='jitter',markersize=1.2,rndfact=1,lgscale=10,datcol=0,
+                           logs=F,tickno=2,fixy=1,angle=T,sem=1,semthick=2,xlabel='',ylabel='',ticklabs=c(),
+                           markersizemean=markersize,xcat=T,orient=1,pairplot=0,flipaxis=1,stretchx=1,col=F,op=1){
   x <- getListNames(data.lst) #names(data.lst) # get the x and y data points
-  #cat('\nfstrip',getListNames(data.lst),'x:',length(x))
   y <- cleanNA(unlist(data.lst))
   #y value that is rndfact times the highest pow of 10 lower than min(y) 
   #fix: so that y is not 0
@@ -1029,9 +1363,10 @@ fstripchartvecs <-function(data.lst,methodstr='jitter',markersize=1.2,rndfact=1,
   #sets the range of min and max y values for plotting
   rangestats <- genRangeTicks(y,rndfact = rndfact,tickno = tickno,fix=fixy,logs = logs)
   assignVarVals(c('roundy','yrange','yticks'),rangestats)
-  
+  cat('\nnowsds')  
   #calculate the mean and sd of the data, and the xlabels
   layermnstd <- getMeanSds(data.lst = data.lst,sem = sem)
+  #cat('\nlayermeanstd',str(layermnstd),'ticklabs',ticklabs,'x',x)
   #pick names for the tick labels on the x-axis. first check if they are specified, if not next stop: data.lst, and default: numbers
   if(length(ticklabs)>0) xlabels <- ticklabs
   else {#check if there are no names specified for the lists, then assign numbers as the list names
@@ -1046,17 +1381,21 @@ fstripchartvecs <-function(data.lst,methodstr='jitter',markersize=1.2,rndfact=1,
   par(font.axis = 2) #make axes bold again, Haha!
   #par(oma=c(1,0,1,1))
   par(pin=c(.5,2.25),xpd=NA) #adjust size of the display
-  plotMultipleStrips(data.lst = data.lst,markersize = markersize,yrange = yrange,methodstr = methodstr,plcolors = const.plcolors,flipaxis = flipaxis,
-                     nox=nox,stretchx=stretchx,plsymbols = const.plsymbols,col=col)
+  plotMultipleStrips(data.lst = data.lst,markersize = markersize,yrange = yrange,methodstr = methodstr,
+                     plcolors = const.plcolors,flipaxis = flipaxis,nox=nox,stretchx=stretchx,
+                     plsymbols = condVal(op==3,NA,const.plsymbols),col=col,datcol=datcol)
   #do the y axis labels,mgp, p controls the axis posn, line controls label posn
   #if p is higher and line are higher they move the axis and label further away
+  #cat('\nhere:xticks',xlabels,':',xlabel)
   plotStripAxes(xticks = xlabels,yticks=yticks,xlabel = xlabel,ylabel = ylabel,
                 lgscale = lgscale,logs = logs,xcat = xcat,flipaxis = flipaxis,angle=angle)
-  plotMultipleMeanSds(data.lst = layermnstd,std = std,nox = nox,markersizemean = markersizemean,semthick = semthick,
-                      orient = orient,plcolors = const.plcolors,flipaxis = flipaxis,plsymbols = const.plsymbols,col=col)
+  plotMultipleMeanSds(data.lst = layermnstd,std = std,nox = nox,markersizemean = markersizemean,
+                      semthick = semthick,orient = orient,plcolors = const.plcolors,flipaxis = flipaxis,
+                      plsymbols = const.plsymbols,col=col,datcol=datcol)
   if(pairplot>0) drawLinesList(data.lst = data.lst,pairplot=pairplot,plcolors = const.plcolors,col=col) #draws lines between points
   #if(pairplot>0) drawLines(xpts = nox,ypts = data.lst,op=pairplot)
-  layermnstd
+  #layermnstd
+  T
 }
 
 #plots multiple stripchats as needed
@@ -1064,16 +1403,16 @@ fstripchartvecs <-function(data.lst,methodstr='jitter',markersize=1.2,rndfact=1,
 #stretchx: the amount by which to stretch the x-axis. the default is 5x. To nullify, do 0.2
 #col: adds color to the various points of the plot. Mainly matters when we have a list.
 #flipaxis: 1 - as it is, 2 - the y-axis becomes the x-axis
-plotMultipleStrips<-function(data.lst,markersize,yrange,methodstr,plsymbols=c(),plcolors=c(),flipaxis=1,nox=nox,stretchx=stretchx,col=F,op=1){
+#op=1, deafult, 2 - do not plot the points
+plotMultipleStrips<-function(data.lst,markersize,yrange,methodstr,plsymbols=c(),plcolors=c(),flipaxis=1,nox=nox,
+                             stretchx=stretchx,col=F,datcol=0,op=1){
   flipval <- switch(flipaxis,T,F)
-  #cat('\n',plcolors)
   lightcolors <- lighten(plcolors,factor = 80) #lightened colors for the data
   #cat('\n',plcolors,':',lightcolors)
   # the defauilt stretch is 5 fold over the default assigned by R. On top that you can use the stretchfator to adjust accordingly
   # the way it currently works: specifying a limit like c(1,2) assigns this interval to the current default length, and then other nos are assigned in relation to this interval
   #stretchfactor: controls the spacing between the x ticks,for 2 ticks it is 1, and for 8 it is 0.2. the lower the #, the less the space: eqn y = -.9/7x + 8.6/7
   stretchfactor <- (0.5/6)*length(nox) + (2.5/3)
-  #xlimit <- c(min(nox),min(nox)+(stretchfactor*(max(nox)-min(nox))/(stretchx)) )
   xlimit <- c(min(nox),min(nox)+(stretchfactor/stretchx) )
   ylimit <- yrange
   if(flipaxis==2) {
@@ -1081,30 +1420,50 @@ plotMultipleStrips<-function(data.lst,markersize,yrange,methodstr,plsymbols=c(),
     xlimit <- c(yrange[1],yrange[1]+(stretchfactor*(yrange[2]-yrange[1])/(stretchx)) )
     ylimit <- c(min(nox),max(nox))
   }
-  cat('\nlimits',xlimit,';',ylimit,';nox ',nox,' stretch:',stretchfactor)
-  #xlimit <- c(1,2)
-  if(isDataType(data.lst[[1]]) == 4 ){#nested list
+  cat('\nlimits',xlimit,';',ylimit,';nox ',nox,' stretch:',stretchfactor,'data type:',isDataType(data.lst[[1]]))
+  if(isDataType(data.lst[[1]]) == 4 || isDataType(data.lst[[1]]) == 3){#nested list of lists
+    #added new condition to also do list of DFs which is data type 3. Have to fix the labels, though
+    #cat('\nbeforeloop',names(data.lst),':',names(data.lst[[1]]),':')
     for(i in seq_wrap(1,length(data.lst))){
       if(col==T) colop <- i #if you dont want color, just plot grey points
       else colop <- 1 #1 - black
-      #plotMultipleStrips(data.lst = x,markersize = markersize,yrange = yrange,methodstr = methodstr)
+      #cat('\nplotting ',i,str(data.lst[[i]]))
       if(i==1)  stripchart(data.lst[[i]],
-                           vertical=flipval,pch=plsymbols[i],col=lightcolors[colop],xlim=xlimit,yaxt="n",ylab="",cex=markersize,
-                           ylim=ylimit,frame.plot = FALSE,method=methodstr,
+                           vertical=flipval,pch=plsymbols[i],col=lightcolors[colop],xlim=xlimit,yaxt="n",
+                           ylab="",cex=markersize,ylim=ylimit,frame.plot = FALSE,method=methodstr,
                            xaxt="n",lwd=2,las=1,cex.axis=1.5)
       else stripchart(data.lst[[i]],
-                      vertical=flipval,pch=plsymbols[i],col=lightcolors[colop],xlim=xlimit,yaxt="n",ylab="",cex=markersize,
-                      ylim=ylimit,frame.plot = FALSE,method=methodstr,
+                      vertical=flipval,pch=plsymbols[i],col=lightcolors[colop],xlim=xlimit,yaxt="n",
+                      ylab="",cex=markersize,ylim=ylimit,frame.plot = FALSE,method=methodstr,
                       xaxt="n",lwd=2,las=1,cex.axis=1.5,add = T)
     }
   }
-  else {#not a nested list
-    if(col==T) colop <- 2 #if you dont want color, just plot grey points
-    else colop <- 1
-    stripchart(data.lst,
-               vertical=flipval,pch=plsymbols[1],col=lightcolors[colop],xlim=xlimit,yaxt="n",ylab="",cex=markersize,
-               ylim=ylimit,frame.plot = FALSE,method=methodstr,
-               xaxt="n",lwd=2,las=1,cex.axis=1.5)
+  else {#not a nested list; 
+    if(col==T && datcol==1){#data in df, each row is the same entity,e.g., species, and each column a property. All 
+      #properties of the same entiry in the same color
+      cat('\n datcol',datcol)
+      lightcolors <- lighten(plcolors,factor = 50) #lighten colors for the data
+      stripchart(data.lst[1,],
+                 vertical=flipval,pch=plsymbols[1],col=lightcolors[1],xlim=xlimit,yaxt="n",ylab="",cex=markersize,
+                 ylim=ylimit,frame.plot = FALSE,method=methodstr,
+                 xaxt="n",lwd=2,las=1,cex.axis=1.5)
+      for(i in seq_wrap(1,length(data.lst[,1]))){
+        stripchart(data.lst[i,],
+                   vertical=flipval,pch=plsymbols[1],col=lightcolors[i],xlim=xlimit,yaxt="n",ylab="",cex=markersize,
+                   ylim=ylimit,frame.plot = FALSE,method=methodstr,
+                   xaxt="n",lwd=2,las=1,cex.axis=1.5,add=T)
+        
+      }  
+    } 
+    else {
+      if(col==T) colop <- 2 #if you dont want color, just plot grey points
+      else colop <- 1
+      #cat('\ndatcol',methodstr)
+      stripchart(data.lst,
+                 vertical=flipval,pch=plsymbols[1],col=lightcolors[colop],xlim=xlimit,yaxt="n",ylab="",cex=markersize,
+                 ylim=ylimit,frame.plot = FALSE,method=methodstr,
+                 xaxt="n",lwd=2,las=1,cex.axis=1.5)
+    }
   }
 }
 
@@ -1127,23 +1486,30 @@ drawLinesList <- function(data.lst,pairplot,plcolors=c(),col=F,op=1){
 }
 
 #draws the means and Sds for the different lists
-#data.lst: is the data.lst argument to fstripchartvecs, rest definition see fstripchartvecs 
-plotMultipleMeanSds <- function(data.lst,layermean,std,nox,markersizemean,semthick,orient,plcolors=c(),plsymbols=c(),flipaxis=1,col=F,op=1){
+#data.lst: for stripchartvecs this is the layermnstd variable. For each element, i of data.lst[[i]] = list(mean,sd)
+#is the data.lst argument to fstripchartvecs, rest definition see fstripchartvecs 
+plotMultipleMeanSds <- function(data.lst,layermean,std,nox,markersizemean,semthick,orient,plcolors=c(),
+                                plsymbols=c(),flipaxis=1,col=F,datcol=0,op=1){
   colop <- 1
   if(isDataType(data.lst[[1]]) == 4 ){#nested list
-    #cat('\n',plcolors)
+    #if(isDataType(data.lst))
+    #cat('\nno items',length(data.lst),str(data.lst))
     for(i in seq_wrap(1,length(data.lst))){
       if(col==T) colop <- i
-      plotmeansd(means =data.lst[[i]][[1]],std=data.lst[[i]][[2]],nox=nox,epsilon = .1,markersize = markersizemean,
-                 linethick = semthick,orient = orient,colop = colop,plsymbol = plsymbols[i],plcols = plcolors,flipaxis = flipaxis)
+      #cat('\nplotmeansd nox',nox,'means,',data.lst[[i]][[1]],'i',i)
+      plotmeansd(means =data.lst[[i]][[1]],std=data.lst[[i]][[2]],nox=nox,epsilon = .1,
+                 markersize = markersizemean,linethick = semthick,orient = orient,colop = colop,
+                 plsymbol = plsymbols[i],plcols = plcolors,flipaxis = flipaxis)
     }
   }
   else {#not a nested list
     if(col==T) colop <- 2
-    #cat('\nplotmeans',str(data.lst))
+    if(col==T && datcol==1) colop <- 1 #the sds and error bars can be black for rows being same color, with diff. column colors
+    #cat('\nplotmeans',length(data.lst),plcolors)
     #cat('\n',str(data.lst),'nox ',nox)
     plotmeansd(means = data.lst[[1]],std=data.lst[[2]],noxlabels = nox,epsilon = .1,markersize = markersizemean,
-              linethick = semthick,orient = orient,colop = colop,plsymbol = plsymbols[1],plcols = plcolors,flipaxis=flipaxis)
+              linethick = semthick,orient = orient,colop = colop,plsymbol = plsymbols[1],plcols = plcolors,
+              flipaxis=flipaxis)
   }
 }
 
@@ -1152,17 +1518,23 @@ plotMultipleMeanSds <- function(data.lst,layermean,std,nox,markersizemean,semthi
 #op = 1 get mean/sd of all the leaf lists
 #op = 2 gets the mean/sd of the all the leaf list elements
 getMeanSds <- function(data.lst,sem,op=2){
-  if(isDataType(data.lst[[1]]) == 4 ){#nested list
+  #cat('\ngetMesddw',isDataType(data.lst[[1]]))
+  if(isDataType(data.lst[[1]]) == 4 ){#nested list of lists
     res <- lapply(data.lst,function(x) getMeanSds(x,sem = sem,op=1))
+  }
+  else if(isDataType(data.lst[[1]]) == 3 ){#nested list of DFs, convert each column to vector in a list
+    res <- lapply(data.lst,function(x) getMeanSds(as.list(x),sem = sem,op=1))
   }
   else {#not a nested list
     #calculate the mean and sd of the data, and the xlabels
+    #cat('\nlist elems',str(data.lst),str(data.lst[[1]]))
     layermean <- sapply(data.lst,function(x) mean(x,na.rm = T))   
     std <- sapply(data.lst,function(x) switch(sem,sd(x,na.rm = T)/(length(x)^.5),
                                               sd(x,na.rm = T),1.96*sd(x,na.rm = T)/(length(x)^.5),
                                               0))
     res <- list(layermean,std)
   }
+  #print(res)
   res
 }
 
@@ -1170,7 +1542,9 @@ getMeanSds <- function(data.lst,sem,op=2){
 #op = 1 gets the names of all the leaf lists
 #op = 2 gets the names of the all the leaf list elements
 getListNames<-function(lst.names,op=2){
-  if(isDataType(lst.names[[1]]) == 4 && op==2){#nested list
+  #print(lst.names)
+  #cat(isDataType(lst.names[[1]]),'sfs')
+  if((isDataType(lst.names[[1]]) == 4 || (isDataType(lst.names[[1]]) == 3)) && op==2){#list of lists or DFs
     allnames <- lapply(lst.names,function(x) names(x))
     res <- unique(unlist(allnames))
     if(length(res)==0) res <- unique(unlist(lapply(lst.names,function(x) 1:length(x)) ) )
@@ -1180,6 +1554,7 @@ getListNames<-function(lst.names,op=2){
     res <- names(lst.names)  
     if(length(res)==0) res <- 1:length(lst.names)
   }
+  #cat('\nres',res)
   res
 }
 
@@ -1248,8 +1623,9 @@ plotmeansd <- function(means,std,noxlabels,colop=1,plcols=c(),plsymbol=19,epsilo
     else{#the input is in the form of x and y  vectors
       #cat('\ncop',colop)
       #if multiple stddev plot them one after the other
-      if(length(plcols)==0) plcolors <- c('black','red','blue','green','grey','magenta') #set the colors for plotting
-      else plcolors <- plcols
+      # if(length(plcols)==0) plcolors <- c('black','red','blue','green','grey','magenta') #set the colors for plotting
+      # else plcolors <- plcols
+      plcolors <- const.plcolors
       #calculate the std dev bar widths, but onyl if x labels are numeric, as a percentage
       #of markersize. for a markerssize of 1.75, epsilon is .04
       if(is.numeric(noxlabels)) epsilon <- epsilon * (markersize/1.75)#earlier: epsilon*(max(noxlabels)-min(noxlabels))#episolon*x-axis width 
@@ -1257,7 +1633,7 @@ plotmeansd <- function(means,std,noxlabels,colop=1,plcols=c(),plsymbol=19,epsilo
       #liam fixed error where x and y axes are backwards
       #Also introduced options for flip axis, when you change the x and y axes. Then the locations of the means and the orientations of SEM bars has to be flipped, too
       if (op==1) {#op=1 means draw the means point, too, guess
-        #cat('\nmeans',means,':',noxlabels)
+        #cat('\nsingleplotmeansd:means',means,':',noxlabels)
         if(flipaxis==1) points(noxlabels,means,pch=plsymbol,cex=markersize*1,col=plcolors[colop])
         else points(means,noxlabels,pch=plsymbol,cex=markersize*1,col=plcolors[colop])
       }
@@ -1299,7 +1675,7 @@ plotmeansd <- function(means,std,noxlabels,colop=1,plcols=c(),plsymbol=19,epsilo
 #orient: whether the means and std should be along the x=1 or y=2 axis
 #linewidth: width of the std lines
 plotmeansdx <- function(means,std,noxlabels,epsilon=.02,op=1,linewidth=2,orient=1){
-  cat('\nplotmeansdx',means-std,'\n',noxlabels,'\n',means+std,'\n',noxlabels)
+  #cat('\nplotmeansdx',means-std,'\n',noxlabels,'\n',means+std,'\n',noxlabels)
   if(orient==1){
     # the mean
     if (op == 1) points(means,noxlabels,pch=19,cex=1.5)
@@ -1322,10 +1698,12 @@ plotmeansdx <- function(means,std,noxlabels,epsilon=.02,op=1,linewidth=2,orient=
 #this function plots a horizontal bar plot
 #change it so that all parameters are a list of arguments
 #input: a data frame with the data in columns. Will average and do the sds. Could also potentially be a list
+#for op = 5, it is a list of data frames
 #if fixaxis is 1, automatically choose highest and lowest, otherwise choose the fixaxis
 #vector
 #color: specified the color palette, g - grey scale, rgb - basically color, b - blue color scale, 's' -same color all scales
-#colorsel: spcifies the level of grey, between 1 and 6 with 1 being the darkest  
+#colorsel: spcifies the level of grey, between 1 and 6 with 1 being the darkest
+#shaedop: specifies the shade of the color you want. 1 as it is and 0 would be the lightest, maybe just white  
 #sepwidth: denotes the tick width
 #spaces: space between bars. default: 0.05
 #bordcol: NA no border, or whatever color is specified in border
@@ -1333,52 +1711,28 @@ plotmeansdx <- function(means,std,noxlabels,epsilon=.02,op=1,linewidth=2,orient=
 #outputop: 0 - do nothing; 1- if you want to print se and means
 #grpspace: the space between groups. actual value is 2 *grpspaces
 #linewidth: thickness of the std lines
+#cex: c(xsize,ysize) controls the size of the axes tick labels for either axis. basically cex:
 #sem: T plot sems, F do not plot sems
 #op =1 default, 2 - only one row/vector to print, 3 - multiple rows, with each row being one group. No of groups are the number of rows
 #4  - if you want to stack 'em
 #op= 3 and 4 specify the condition where there are groups and sub-groups, where each sub-group is 
 #repeared across the groups, like knn, LDA results for dissimilar and similar cells.
-HorzBarPlot <- function(dat.df, color = 'g',colorsel=1,rndfact=1,fixx=1,ticknox=1,lastx=0,sepwidth=1,spaces=0.05,grpspace=2.5,angle=c(),
-                        font=c(2,2),barwidth=1,linewidth=1,logs=F,horz=T,bordcol=NA,grplabel=F,outputop=0,sem=T,op=1) 
+#op 5 = a list of data frames with each list item of data frames being a group that you want to compare
+HorzBarPlot.old <- function(dat.df, color = 'g',colorsel=1,shadeop=1,rndfact=1,fixx=1,ticknox=1,lastx=0,sepwidth=1,spaces=0.05,grpspace=2.5,angle=c(),font=c(2,2),cex=c(1.2),barwidth=1,linewidth=1,logs=F,horz=T,bordcol=NA,grplabel=F,outputop=0,sem=T,op=1) 
 {
-  if(grplabel) grplabs <- rownames(dat.df) #if specified, group labels
-  else grplabs <- c()
-  grp <- T # = T for op=1-3, F for 4 
-  #assign bar colors
-  barcolors <- switch(color,
-                      'g' = const.plgreycolors[1:length(means)], #greyscale 
-                      'c' = const.plcolors[1:length(means)], #color scale
-                      'b' = const.plbluecols[1:length(means)], #blue color scale
-                      's' = rep(const.plgreycolors[colorsel],length(means)), # same color all scales
-  )
-  if(op==3 || op==4){#we are grouping by rows or stacking by rows
-    data.lst <- unlist(dat.df[1,])
-    barspaces <- c(spaces,grpspace*spaces) #specifies spaces between sub-groups and groups
-    means <- t(as.matrix(dat.df)); sd <- rep(0,length(means));ranmeans <- means
-    # if(color=='g') barcolors <- const.plgreycolors[1:ncol(dat.df)] #greyscale or color scale
-    # else barcolors <- const.plcolors[1:ncol(dat.df)]  
-    if(op==3){
-      catlabs <- rep(colnames(dat.df),nrow(dat.df)) #nnames of categorical labels
-    } else {
-      catlabs <- rep(rownames(dat.df)) #nnames of categorical labels
-      ranmeans <- apply(dat.df, 1, sum)
-      grp <- F
-    }
-    #cat('\n',data.lst)  
-  } else {#op=1 and 2
-    #calculate the mean and sd of the data, and the xlabels
-    data.lst <- dat.df
-    means <- sapply(dat.df,mean);std <- sapply(data.lst,sd)/(length(data.lst[[1]]))^.5;ranmeans <- means
-    barspaces <- spaces #specifies spaces between groups; no sub-groups here
-    catlabs <- colnames(dat.df) #nnames of categorical labels
-  }
+  #capture all the parameters and pass onto the init function to do initialization functions
+  captured_call <- match.call()
+  init.res <- initHorzBarParams(captured_call,environment(),formals(HorzBarPlot))
+  #cat('\nHBPreturn',init.res[[2]])
+  assignVarVals(c('data.lst','barspaces','means','std','ranmeans','grp','nocolors','grplabs','data.lst','std.lst','cex.xy'),init.res)
+  #no of colors is the same of no of catlabels
+  barcolors <- barcolors[1:nocolors]
   #common setup stuff
   #set the range of min and max y values for plotting
-  #old: rangestats <- genRangeTicks(ranmeans,rndfact = rndfact,tickno = ticknox,fix=fixx,logs = logs,op=2)#op=2, force ticks from 0
-  rangestats <- genRangeTicks(unlist(dat.df),rndfact = rndfact,tickno = ticknox,fix=fixx,logs = logs,op=2)#op=2, force ticks from 0
+  rangestats <- genRangeTicks(unlist(dat.df),rndfact = rndfact,tickno = ticknox,fix=fixx,logs = logs,op=2)#op=2,force ticks from 0
   assignVarVals(c('roundx','xrange','xticks'),rangestats)
   # value plus/minus a little round-off to accomodate the circle
-  highestx <- max(dat.df)+roundx; lowestx <- 0 - roundx 
+  highestx <- max(unlist(dat.df))+roundx; lowestx <- 0 - roundx 
   #cat('\nxticks',xticks,', roundx:',roundx,'lowest,highestx:',lowestx,highestx,'means',means)
   par(pin=c(2,2),xpd=F)
   if ( outputop == 1) cat(means,", ",std)
@@ -1387,28 +1741,107 @@ HorzBarPlot <- function(dat.df, color = 'g',colorsel=1,rndfact=1,fixx=1,ticknox=
     bp <- barplot(means, col = barcolors, border = bordcol,horiz = horz,xlim = c(lowestx,highestx),
                 width=0.1*barwidth, space = barspaces, axes = F,yaxt="n",xaxt="n",beside = grp)
     plotTicksAxes(xticks = xticks,yticks = bp,ylabel = catlabs,xlabel = xticks,ypos = abs(bp[1]-bp[2])/2,font=font,
-                  xpos = (highestx-lowestx)/15, las = 1,cex = 1.2,angle = c(0,0),tickwidth = sepwidth,horz = horz,grouplabels=grplabs)
+                  xpos = (highestx-lowestx)/15, las = 1,cex = cex.xy,angle = c(0,0),tickwidth = sepwidth,horz = horz,grouplabels=grplabs)
   }
   else {#the bars are vertical
     #have to do bp first to get the xlim for getting the length of the x axis with the categorical variables
     bp <- barplot(means,width=barwidth*0.1, space = barspaces,beside = grp)
-    bp <- barplot(means, col = barcolors, border = bordcol,horiz = horz,ylim = c(lowestx,highestx),xlim = c(0,bp[length(bp)]+bp[1]),
-                width=0.1*barwidth, space = barspaces, axes = F,yaxt="n",xaxt="n",beside=grp)
-    #cat('\nxpos',abs(bp[1]-bp[2]),'bp:',bp,':',0 - abs(bp[1]-bp[2]),'colmeans')
+    bp <- barplot(means, col = barcolors, border = bordcol,horiz = horz,ylim = c(lowestx,highestx),xlim = c(0,bp[length(bp)]+bp[1]),width=0.1*barwidth, space = barspaces, axes = F,yaxt="n",xaxt="n",beside=grp)
     plotTicksAxes(xticks = bp,yticks = xticks,xlabel = catlabs,ylabel = xticks,xpos = abs(bp[1]-bp[2])/2,font = font,
-                  ypos = (highestx-lowestx)/15, las = 1,cex = 1.2,angle = c(90,0),tickwidth = sepwidth,horz = horz,grouplabels=grplabs)
+                  ypos = (highestx-lowestx)/15, las = 1,cex = cex.xy,angle = c(90,0),tickwidth = sepwidth,horz = horz,grouplabels=grplabs)
   }
   #adding the points, means, SD
-  #points(as.matrix(data.lst),rep(bp,each=3),pch=21,col="black",cex=2)
   #make the points into a DF of x and y points, and plot means and SD
   if(op==1){
     if (horz) tmp <- makeXYDf(data.lst=data.lst,means = bp)
     else tmp <- makeXYDf(data.lst=data.lst,means = bp,op=2)
-    #print(tmp);print(data.lst)
     points(tmp,pch=const.plsymbols[3],col="black",cex=2) #symbol three is a circle
   }
   if(sem) plotmeansdx(means,std,bp,epsilon=.02,op=2,orient = ifelse(horz,1,2),linewidth = linewidth)
+  
+}
 
+#initializes the setup for the HorzBarPlot function
+initHorzBarParams <- function(callobj,env,defaults){
+  #do an initial setup to reveover all the parameters of HorzBarPlot
+  callpars <- as.list(callobj)[-1] #the parameters that weer eassgined
+  var.names <- unique(names(c(callpars,defaults))) #all parameters including default
+  obj.pars <- list()
+  for(i in seq_wrap(1,length(var.names))){
+    posn <- which(names(callpars)==var.names[i])
+    if(length(posn)>0){
+      obj.pars[[i]] <- eval(callpars[[posn]],envir = env)
+    }
+    else {
+      posn <- which(names(defaults)==var.names[i])
+      obj.pars[[i]] <- eval(defaults[[posn]],envir = env)
+    }
+  }
+  names(obj.pars) <- var.names
+  #initialize all the variables that might be used and to be returned to 0 or def values
+  data.lst <- barspaces <- means <- std <- ranmeans <- nocolors <- data.lst <- std.lst <- 0
+  grp <- T
+  if (length(obj.pars$cex)==1) cex.xy <- c(obj.pars$cex,obj.pars$cex)
+  else cex.xy <- obj.pars$cex
+  if(obj.pars$grplabel) grplabs <- rownames(obj.pars$dat.df) #if specified, group labels
+  else grplabs <- c()
+  #now, go through all the options
+  if(obj.pars$op==3 || obj.pars$op==4){#we are grouping by rows or stacking by rows
+    data.lst <- unlist(obj.pars$dat.df[1,])
+    barspaces <- c(obj.pars$spaces,obj.pars$grpspace*obj.pars$spaces) #specifies spaces between sub-groups and groups
+    means <- t(as.matrix(obj.pars$dat.df)); std <- rep(0,length(means));ranmeans <- means
+    if(obj.pars$op==3){
+      catlabs <- rep(colnames(obj.pars$dat.df),nrow(obj.pars$dat.df)) #nnames of categorical labels
+    } else {
+      catlabs <- rep(rownames(obj.pars$dat.df)) #nnames of categorical labels
+      ranmeans <- apply(obj.pars$dat.df, 1, sum)
+      grp <- F
+    }
+    nocolors <- length(rownames(obj.pars$dat.df))
+  } else if (obj.pars$op==5){#super groups and groups
+    #calculate the barspaces everything else is the same; data is a list of dfs to compare
+    subgrp.spacing <- c(rep(obj.pars$spaces,nrow(obj.pars$dat.df[[1]])-1)) #the subgrp, a spacing between each bar
+    grp.spacing <- c(rep(c(subgrp.spacing,obj.pars$grpspace*obj.pars$spaces),ncol(obj.pars$dat.df[[1]])-1),subgrp.spacing) #subgrp and spavcing b/w subgrps
+    barspaces <- c(obj.pars$spaces,rep(c(grp.spacing,3*obj.pars$grpspace*obj.pars$spaces),length(obj.pars$dat.df)-1),grp.spacing)
+    data.df <- convertListToDF(obj.pars$dat.df,coltype = 1)
+    means <- (as.matrix(data.df)); std <- rep(0,length(means));ranmeans <- means
+    catlabs <- rep(rownames(obj.pars$dat.df[[1]]),length(obj.pars$dat.df))
+    nocolors <- length(rownames(obj.pars$dat.df[[1]]))
+    if(obj.pars$grplabel) grplabs <- rep(names(obj.pars$dat.df),each=ncol(obj.pars$dat.df[[1]])) #if specified, group labels
+  } else {#op=1 and 2
+    #calculate the mean and sd of the data, and the xlabels
+    data.lst <- obj.pars$dat.df
+    means <- sapply(obj.pars$dat.df,mean);std <- sapply(data.lst,sd)/(length(data.lst[[1]]))^.5;ranmeans <- means
+    barspaces <- obj.pars$spaces #specifies spaces between groups; no sub-groups here
+    catlabs <- colnames(obj.pars$dat.df) #nnames of categorical labels
+    nocolors <- length(colnames(obj.pars$dat.df))
+  }
+  res <- list(data.lst,barspaces,means,std,ranmeans,grp,nocolors,grplabs,data.lst,std.lst,cex.xy)
+  res
+}
+
+
+
+#determine the color selection that we want
+#color: 'g' - grey scale
+#colorsel: spcifies the level of grey, between 1 and 6 with 1 being the darkest, only applies to the 's' option  
+#shadeop: the level of lightness or shade. 1 is what it is, and 0 is the lightest
+#(color='g',)
+detColors <- function(color='g',colorsel=1,shadeop=1,op=1){
+  #assign bar colors
+  #cat('\ndetcolors',color)
+  barcolors <- switch(color,
+                      'g' = const.plgreycolors, #greyscale 
+                      'c' = const.plcolors[-c(1:2)], #color scale
+                      'b' = const.plbluecols, #blue color scale
+                      's' = const.plgreycolors[colorsel], # same color all scales
+                      'o' = const.plcolors, #all the pl original colors
+                      'bg'= const.plbluecols[c(3,5,7,9)] #specific blue color scale used in glia paper
+  )
+  #apply the shade 
+  shade.col <- sapply(barcolors, function(x) lighten(x,factor = (1-shadeop)*100))
+  #cat('\ncolors',shade.col,'\nold colors',barcolors,'\ngrey',const.plgreycolors,'\ncolors',const.plcolors)
+  shade.col  
 }
 
 #plots the ticks for the x and y axes, and also the axes as required
@@ -1419,24 +1852,28 @@ HorzBarPlot <- function(dat.df, color = 'g',colorsel=1,rndfact=1,fixx=1,ticknox=
 #angle: orientation angle c(x orinetation, y orientation)
 #horz: T - the plot or y valuse are along the x axis, F - vice-versa
 #font: font size (x axis,y axis)
+#cex: size of the ticklabels, c(xcex,ycex), if only c(cex) then it is the same for both axes
 plotTicksAxes <- function(xticks,yticks,xlabel=c(),ylabel=c(),xpos=0,ypos=0,angle=c(45,0),font=c(2,2),axeop=F,cex=1.2,las=1,
                           tickcol='white',tickwidth=1,horz=F,grouplabels=c(),op=1){
+  if (length(cex)==1) cex.xy <- c(cex,cex)
+  else cex.xy <- cex
   #x axis
   yposn <- 0 - ypos #(highestx-lowestx)/15
   #cat('\nx',ypos,';',horz)
   adjv <- ifelse(horz,c(0.5,0.5),c(1,0.5))
-  text(x=xticks,y=yposn,srt=angle[1],adj = adjv,labels = xlabel,xpd=T,las=las,cex=cex,font=font[1])#adj centers the label
+  text(x=xticks,y=yposn,srt=angle[1],adj = adjv,labels = xlabel,xpd=T,las=las,cex=cex.xy[1],font=font[1])#adj centers the label
+  #text(x=xticks,y=yposn,srt=angle[1],adj = adjv,labels = xlabel,xpd=T,las=las,cex=.8,font=font[1])#adj centers the label
   
   #y-axis
   xposn <- 0 - xpos #abs(bp[1]-bp[2])/2
   #cat('\ny',ypos,';',xticks,',x ',xposn)
-  text(x=xposn,y = yticks,adj = 1,srt=angle[2],las=las,cex=cex,font=font[2],labels=ylabel,xpd=T)
+  text(x=xposn,y = yticks,adj = 1,srt=angle[2],las=las,cex=cex.xy[2],font=font[2],labels=ylabel,xpd=T)
     
   #group labels if called for.
   nolabs <- length(grouplabels)
   if(nolabs>0) {#group labels
-    if(!horz) text(x=xticks[seq(ceiling(nolabs/2),length(xticks),nolabs)],y=yposn*8,srt=0,adj = c(0.5,0.5),labels = grouplabels,xpd=T,las=las,cex=cex,font=font[1]*0.5)  
-    else text(y=yticks[seq(ceiling(nolabs/2),length(yticks),nolabs)],x=xposn*8,srt=0,adj = c(0.5,0.5),labels = grouplabels,xpd=T,las=las,cex=cex,font=font[1]*0.5)  
+    if(!horz) text(x=xticks[seq(ceiling(nolabs/2),length(xticks),nolabs)],y=yposn*8,srt=0,adj = c(0.5,0.5),labels = grouplabels,xpd=T,las=las,cex=cex.xy[1],font=font[1]*0.5)  
+    else text(y=yticks[seq(ceiling(nolabs/2),length(yticks),nolabs)],x=xposn*8,srt=0,adj = c(0.5,0.5),labels = grouplabels,xpd=T,las=las,cex=cex.xy[2],font=font[1]*0.5)  
     #cat('\ngrplabsl',xticks[seq(ceiling(nolabs/2),length(xticks),nolabs)],';',grouplabels,':',horz)
   } 
   
@@ -1454,6 +1891,7 @@ plotTicksAxes <- function(xticks,yticks,xlabel=c(),ylabel=c(),xpos=0,ypos=0,angl
 #data.df: the data is taken along the rows, i.e., each bar contains data from the same row.
 #std: the standard deviation for the data. THe size is 
 #color: the color of the bars. default: 'g': grey, 'c': normal colors, 'b': the blue shade paletter
+##shadeop: the level of lightness or shade. 1 is what it is, and 0 is the lightest
 #fontsize: controls the size of the y-axis font
 #sepwidth: the width of the xticks white line that runs through
 #sepcolor: the color pf the separator
@@ -1461,10 +1899,11 @@ plotTicksAxes <- function(xticks,yticks,xlabel=c(),ylabel=c(),xpos=0,ypos=0,angl
 #angle: the angle for the x axis label
 #linewidth: specifies the width of the line for the stdev
 #borderop: to border or not T: borderr, F - no border
+#horz: whether you want the plot to be horz or vert
 #width: specifies the widths of the bars: 1 - specifies the same width for all
 #c(1,2,1,1,...): assigns bar widths according to their proportions of the total
 #op =1 default, 2 - print se and means
-stackedHorzBarPlot <- function(data.df, std=c(),color = 'g',rndfact=1,fixx=1,ticknox=1,lastx=0,spaces=0.05,
+stackedHorzBarPlot <- function(data.df, std=c(),color = 'g',shadeop=1,rndfact=1,fixx=1,ticknox=1,lastx=0,spaces=0.05,
                                borderop=F,logs=F,horz=T,fontsize=1,sepwidth=0.5,sepcolor="white",legend=F,
                                angle=0,linewidth=1,width=1,op=1) {
   #calculate the mean and sd of the data, and the xlabels
@@ -1475,17 +1914,9 @@ stackedHorzBarPlot <- function(data.df, std=c(),color = 'g',rndfact=1,fixx=1,tic
   assignVarVals(c('roundx','xrange','xticks'),rangestats)
   cat('\nround',roundx,'xrange',xrange,'xticks',xticks)
   highestx <- xrange[2]+roundx;lowestx <- 0
-  #cat('\nticks',xticks,',',roundx,lowestx,highestx,'\n')
-  #par(oma=c(1,0,1,2))
   par(pin=c(2.5,2),xpd=F)
-  #par(xpd=F)# makes sure that the lines are drawn within the frame plot region
   #set the color array
-  if(length(color)==1){
-    colarr <- c(1:3);names(colarr) <- c('g','c','b') 
-    colour <- switch(colarr[color],const.plgreycolors,const.plcolors,const.plbluecols)
-    cat('\ncolors ',colour,' ',const.plcolors)
-  }
-  else colour <- color
+  colour <- detColors(color = color)  
   #bp denotes the y axis midpoints of the barplot data, col = colors()[c(23,89,12,10,20)],
   if(horz==T) bp <- barplot(t(as.matrix(data.df)),col=colour,border = borderop,space = spaces,horiz = horz,
                             xlim = c(0,highestx),width=width,  axes = T,yaxt="n",xaxt="n")
@@ -1495,7 +1926,7 @@ stackedHorzBarPlot <- function(data.df, std=c(),color = 'g',rndfact=1,fixx=1,tic
   #barplot(t(as.matrix(data.df)),col=colors()[c(23,89,12,10,20)] ,border="white",space=0.04,font.axis=2,xlab="group",horiz = T)
   #cat('\nbp',bp,':',xticks,highestx)
   if(horz)  {#if you want a horizontal bar plot
-    cat('labels',row.names(data.df),'bp',bp)
+    #cat('labels',row.names(data.df),'bp',bp)
     axis(side=2, at=bp,labels=rownames(data.df),las=1,tick=F,cex.axis=1.2*fontsize,mgp=c(1,.25,.1))
     abline(v=xticks,col=sepcolor,lwd=sepwidth)
     if(xticks[length(xticks)] > max(dat)) xticks <- xticks[-length(xticks)]
@@ -1701,6 +2132,136 @@ drawMatGridPlotCol <-function(vec,cols=c('gray'),grayscale=T,levels=1,xsize=1,ys
 }
 
 
+#draw circle with radius R, given a vector of numbers? The numbers within are plotted along the radii of the 
+#circle at the distance specified by each of the numbers. Each number is plotted on a separate spoke or 
+#radius by traversing along the 360 angle around the center.
+#circle.thick: thickness of circle
+#thickness: thickness of the spokes
+#todo: let it take a matvec, the same as the shadedrings function
+drawCirclePts <- function(matvec, markersize=0.4, xycols=c(2,3), spoke.col = 'grey',axesop=3,thickness=0.4,circle.thick=1,op = 1) {
+
+  # Compute angles for placing points, and x and y points
+  if((isDataType(matvec) == const.DataType$matrix || isDataType(matvec) == const.DataType$dataframe) ){
+    n <- nrow(matvec)  # Number of points
+    vec <- mapVecToRange(matvec[,1],c(0,n-1))
+    angles <- atan2(matvec[,xycols[1]],matvec[,xycols[2]])
+  } else {
+    n <- length(matvec)  # Number of points
+    vec <- mapVecToRange(matvec,c(0,n-1))
+    angles <- seq(0, 2 * pi, length.out = length(vec) + 1)[-1]; 
+  }
+  # Convert polar coordinates (radius, angle) to Cartesian (x, y)
+  x <- vec * cos(angles)
+  y <- vec * sin(angles)
+  
+  maxval <- max(vec)
+  
+  # Plot setup
+  fploteq(x,y,fixx = c(-maxval,maxval),fixy = c(-maxval,maxval),markersize = markersize,axesop=axesop)
+  
+  # Draw circle outline
+  symbols(0, 0, circles = max(vec), inches = FALSE, add = TRUE, lwd = circle.thick)
+  
+  #cat('\nmax',max(vec),'\n',sqrt(x^2 + y^2) )
+  
+  # Draw spokes
+  segments(0, 0, x, y, col = spoke.col,lwd = thickness)
+  
+  # Add labels at the points
+  #text(x, y, labels = vec, pos = 3, cex = 0.8)
+}
+
+
+#draw a shaded circle with the vector forming the points within each circle. break the circle into n 
+#concentric circles, and color each circle based on a heat map of how many of the vector points fall 
+#within that circle. I want to specify the color of the heat map, and the circles will be shaded based 
+#on the number of points within the circle. color specifes the heat map color and it is blue by deafault. 
+#the heat map goes from the lowest to the highest value of the vector
+#vec: these are vectors or matrices/DF, if matrices each row specifies the c(value,x,y,thickness)
+#if it is a matrix, the first column is the vector to be plotted, and columns 2 and 3 are x and y coordinates 
+#n: no of concentric Rings
+#col: the palette, default const.plblucolors
+#markersize: the size of the points 
+#axesop: whether you want to see the axes. Axesop=3, no axes, 1 and 2 - normal and with supersecripts
+#markcol: col of the marker
+#xycols: gives you the cols that contain the x and y coordinates for matvec
+#op: 1 - relative densities, 2 - absolute densities
+drawShadedRings <- function(matvec, n, xycols=c(2,3), col = const.plbluecols, markersize=0,markcol='black',axesop=3,op = 1) {
+  #library(grDevices)  # For color functions
+  if(nrow(matvec)==1){
+    cat('can\'t plot just one number'); return(F)
+  }
+  # Compute angles for placing points, and x and y points
+  if((isDataType(matvec) == const.DataType$matrix || isDataType(matvec) == const.DataType$dataframe) ){
+    vec <- mapVecToRange(matvec[,1],c(0,n-1))
+    angles <- atan2(matvec[,xycols[1]],matvec[,xycols[2]])
+  } else {
+    vec <- mapVecToRange(matvec,c(0,n-1))
+    angles <- seq(0, 2 * pi, length.out = length(vec) + 1)[-1]; 
+  }
+  x <- vec * cos(angles)
+  y <- vec * sin(angles)
+  
+  # Define the range of values and bin edges for the concentric rings
+  min.val <- min(vec);max.val <- max(vec)
+  #cat('\n',str(vec),str(matvec))
+  breaks <- seq(min.val, max.val, length.out = n + 1)  # Define the circle radii
+
+  # Count the number of points in each ring
+  counts <- cut(vec, breaks = breaks, include.lowest = TRUE, labels = FALSE)
+  counts.freq <- table(factor(counts, levels = 1:n))  # Get frequency per bin
+  
+  # Generate heatmap colors based on frequency
+  circle.cols <- computeShapesDensityColor(counts.freq,shades = col)
+  cat('\nbreaks',breaks,':',circle.cols,' freq:',counts.freq)
+  
+  # Plot setup
+  fploteq(x,y,fixx = c(-max.val,max.val),fixy = c(-max.val,max.val),markersize = markersize,axesop=axesop)
+
+  # Draw concentric shaded circles in **reverse order** (largest first)
+  for (i in rev(seq_len(n))) {
+    #cat('\nsymbols',i,breaks[i+1])
+    symbols(0, 0, circles = breaks[i + 1], inches = FALSE, add = TRUE,
+            bg = circle.cols[i], fg = NA)  # No border to blend smoothly
+  }
+  
+  # Overlay points
+  points(x, y, pch = 16, col = markcol,cex=markersize)
+}
+
+#compute the number of points in each ring
+#vec is a vector giving the distances of points from the center
+#n: no of concentric rings
+#breaks: a vector giving the radii of each ring's start
+computeRingNoPts <- function(vec,n,op=1){
+  # Define the range of values and bin edges for the concentric circles
+  min.val <- min(vec);max.val <- max(vec)
+  breaks <- seq(min.val, max.val, length.out = n + 1)  # Define the circle radii
+  
+  # Count the number of points in each ring
+  counts <- cut(vec, breaks = breaks, include.lowest = TRUE, labels = FALSE)
+  counts.freq <- table(factor(counts, levels = 1:n))  # Get frequency per bin
+  
+  counts.freq #returns the number of points in each ring
+}
+
+
+#given a color palette specified by shades and the bin count frequency in every concentric ring,
+#will calculate the shading for each ring based on relative densities or number of particles
+#counts: vector of counts/densities in each concentric circle
+#shades: the shades of color
+#op: 1 - number within circle, 2 - density within circle
+computeShapesDensityColor <- function(counts.freq,shades,op=1){
+  n <- length(shades) #no of colors in the palette
+  #make count bins the same number as shades, and make a one to one mapping with shades.
+  #Then, for each count freq. find the corresponding bin and assign the color
+  min.freq <- min(counts.freq); max.freq <- max(counts.freq) + 1 #got to add 0.01 so that the max point is still in the group
+  count.bins <- seq(min.freq,max.freq,(max.freq - min.freq)/n)
+  circle.cols <- shades[findInterval(counts.freq,count.bins)]
+  # cat('\nbins',count.bins)
+  # cat('\nCDcol',n,':',circle.cols,':',shades[findInterval(counts.freq,count.bins)],':',findInterval(counts.freq,count.bins))
+  circle.cols
+}
 
 #generate the appropritate pie-chart
 #dat: data as a vector
@@ -1719,14 +2280,18 @@ drawPieChart<-function(dat,select=c(),radius=2,op=1){
 #the logic is to just draw a stacked barplot, but make the separation width big, and making sure the width
 #of the bar and height are about equal
 #colpal: the color palette
+#op= 1, colpal is a vector, 2 - is a list. So stack the output in rows
 drawColorPalette <- function(colpal,op=1){
-  pal <- const.plbluecols
-  
-  dat <- seq(1,length(colpal),1)
+  if(op==2){
+    barlen <- 1/length(colpal)
+  } else barlen <- 1
+  cat('\n',str(colpal),'\n')
+  print(colpal)
   dat.df <- rbind.data.frame(rep(1,length(colpal)))
-  cat(str(dat.df))
+  #cat(str(dat.df))
   #stackedHorzBarPlot(transposeDF(dat.df),color = 'b')
   stackedHorzBarPlot(dat.df,color = colpal)
+  
 }
 
 
@@ -2046,4 +2611,84 @@ fploteq.old <- function(x,y=c(),eq=F,xlabel='x',ylabel='y',title='',
   plotaxes(xticks,yticks,xlabel=xlabel,ylabel=ylabel,logs=logs,lgscale = lgscale)
 }
 
+#before the split up of this function
+HorzBarPlot.old <- function(dat.df, color = 'g',colorsel=1,shadeop=1,rndfact=1,fixx=1,ticknox=1,lastx=0,sepwidth=1,spaces=0.05,grpspace=2.5,angle=c(),font=c(2,2),cex=c(1.2),barwidth=1,linewidth=1,logs=F,horz=T,bordcol=NA,grplabel=F,outputop=0,sem=T,op=1) 
+{
+  if (length(cex)==1) cex.xy <- c(cex,cex)
+  else cex.xy <- cex
+  if(grplabel) grplabs <- rownames(dat.df) #if specified, group labels
+  else grplabs <- c()
+  grp <- T # = T for op=1-3, F for 4
+  #assign bar colors
+  barcolors <- detColors(color = color,colorsel = colorsel,shadeop = shadeop)
+  if(op==3 || op==4){#we are grouping by rows or stacking by rows
+    data.lst <- unlist(dat.df[1,])
+    barspaces <- c(spaces,grpspace*spaces) #specifies spaces between sub-groups and groups
+    means <- t(as.matrix(dat.df)); std <- rep(0,length(means));ranmeans <- means
+    if(op==3){
+      catlabs <- rep(colnames(dat.df),nrow(dat.df)) #nnames of categorical labels
+    } else {
+      catlabs <- rep(rownames(dat.df)) #nnames of categorical labels
+      ranmeans <- apply(dat.df, 1, sum)
+      grp <- F
+    }
+    nocolors <- length(rownames(dat.df))
+  } else if (op==5){#super groups and groups
+    #calculate the barspaces everything else is the same; data is a list of dfs to compare
+    subgrp.spacing <- c(rep(spaces,nrow(dat.df[[1]])-1)) #the subgrp, a spacing between each bar
+    grp.spacing <- c(rep(c(subgrp.spacing,grpspace*spaces),ncol(dat.df[[1]])-1),subgrp.spacing) #subgrp and spavcing b/w subgrps
+    barspaces <- c(spaces,rep(c(grp.spacing,3*grpspace*spaces),length(dat.df)-1),grp.spacing)
+    data.df <- convertListToDF(dat.df,coltype = 1)
+    means <- (as.matrix(data.df)); std <- rep(0,length(means));ranmeans <- means
+    catlabs <- rep(rownames(dat.df[[1]]),length(dat.df))
+    nocolors <- length(rownames(dat.df[[1]]))
+    if(grplabel) grplabs <- rep(names(dat.df),each=ncol(dat.df[[1]])) #if specified, group labels
+    #cat('\nlabels',grplabs)
+  } else {#op=1 and 2
+    #calculate the mean and sd of the data, and the xlabels
+    data.lst <- dat.df
+    means <- sapply(dat.df,mean);std <- sapply(data.lst,sd)/(length(data.lst[[1]]))^.5;ranmeans <- means
+    barspaces <- spaces #specifies spaces between groups; no sub-groups here
+    catlabs <- colnames(dat.df) #nnames of categorical labels
+    nocolors <- length(colnames(dat.df))
+  }
+  # captured_call <- match.call()
+  # init.res <- initHorzBarParams(captured_call,environment(),formals(HorzBarPlot))
+  # cat('\nHBPreturn',init.res[[2]])
+  # assignVarVals(c('data.lst','barspaces','means','std','ranmeans','grp','nocolors','grplabs','data.lst','std.lst','cex.xy'),init.res)
+  #no of colors is the same of no of catlabels
+  barcolors <- barcolors[1:nocolors]
+  #common setup stuff
+  #set the range of min and max y values for plotting
+  rangestats <- genRangeTicks(unlist(dat.df),rndfact = rndfact,tickno = ticknox,fix=fixx,logs = logs,op=2)#op=2,force ticks from 0
+  assignVarVals(c('roundx','xrange','xticks'),rangestats)
+  # value plus/minus a little round-off to accomodate the circle
+  highestx <- max(unlist(dat.df))+roundx; lowestx <- 0 - roundx 
+  #cat('\nxticks',xticks,', roundx:',roundx,'lowest,highestx:',lowestx,highestx,'means',means)
+  par(pin=c(2,2),xpd=F)
+  if ( outputop == 1) cat(means,", ",std)
+  if(horz==T){
+    bp <- barplot(means,width=barwidth*0.1, space = barspaces,beside = grp,horiz = horz)
+    bp <- barplot(means, col = barcolors, border = bordcol,horiz = horz,xlim = c(lowestx,highestx),
+                  width=0.1*barwidth, space = barspaces, axes = F,yaxt="n",xaxt="n",beside = grp)
+    plotTicksAxes(xticks = xticks,yticks = bp,ylabel = catlabs,xlabel = xticks,ypos = abs(bp[1]-bp[2])/2,font=font,
+                  xpos = (highestx-lowestx)/15, las = 1,cex = cex.xy,angle = c(0,0),tickwidth = sepwidth,horz = horz,grouplabels=grplabs)
+  }
+  else {#the bars are vertical
+    #have to do bp first to get the xlim for getting the length of the x axis with the categorical variables
+    bp <- barplot(means,width=barwidth*0.1, space = barspaces,beside = grp)
+    bp <- barplot(means, col = barcolors, border = bordcol,horiz = horz,ylim = c(lowestx,highestx),xlim = c(0,bp[length(bp)]+bp[1]),width=0.1*barwidth, space = barspaces, axes = F,yaxt="n",xaxt="n",beside=grp)
+    plotTicksAxes(xticks = bp,yticks = xticks,xlabel = catlabs,ylabel = xticks,xpos = abs(bp[1]-bp[2])/2,font = font,
+                  ypos = (highestx-lowestx)/15, las = 1,cex = cex.xy,angle = c(90,0),tickwidth = sepwidth,horz = horz,grouplabels=grplabs)
+  }
+  #adding the points, means, SD
+  #make the points into a DF of x and y points, and plot means and SD
+  if(op==1){
+    if (horz) tmp <- makeXYDf(data.lst=data.lst,means = bp)
+    else tmp <- makeXYDf(data.lst=data.lst,means = bp,op=2)
+    points(tmp,pch=const.plsymbols[3],col="black",cex=2) #symbol three is a circle
+  }
+  if(sem) plotmeansdx(means,std,bp,epsilon=.02,op=2,orient = ifelse(horz,1,2),linewidth = linewidth)
+  
+}
 

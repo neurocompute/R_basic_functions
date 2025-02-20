@@ -32,6 +32,19 @@
   return(invisible(NULL)) 
 }
 
+#function to list all the names ina package
+#package is the name of the package, and not in quotes
+#from: https://www.r-bloggers.com/2012/01/exploring-the-functions-in-a-package/
+lsp <- function(package, all.names = FALSE, pattern) 
+{
+  package <- deparse(substitute(package))
+  ls(
+    pos = paste("package", package, sep = ":"), 
+    all.names = all.names, 
+    pattern = pattern
+  )
+}
+
 testfn <- function(var1,val1,environ=environment()) {
   tmp <- deparse(substitute(var1))
   print(environ)
@@ -62,6 +75,34 @@ assignVarVals <- function(lstvar,lstval) {
     assign(var[x],val[[x]],envir = environ.par)
   },lstvar,lstval)
 }
+
+#gets the var names in the list. The List is of the form list(var1,var2,...) 
+#will return c(var1,var2...): Here is the list is passed to the fn calling getListVarNames
+getListVarNames <- function(lst,op=1) {
+  #substitute just gets the expression, -1 removes list from list(var1,...) and 
+  #deparse makes it a character string
+  # Get the full call stack
+  calls <- sys.calls()
+  
+  # Iterate backwards through the call stack to find the first occurrence of a list call
+  for (i in rev(seq_along(calls))) {
+    call.expr <- calls[[i]]
+    
+    # Ensure the call has at least one argument
+    if (length(call.expr) > 1) {
+      expr <- call.expr[[2]]  # First argument in function call
+      
+      # If lst was created using list(var1, var2), extract names
+      if (is.call(expr) && expr[[1]] == "list") {
+        var.names <- sapply(expr[-1], deparse)
+        return(var.names)
+      }
+    }
+  }
+  names(lst)  
+}
+
+
 
 #some string functions now
 #gets the the posns of the last occurance of pattern in string
@@ -161,8 +202,38 @@ getPattern <- function(string,pattern,prepattern='',postpattern='.*',op=1){
   #now do the postpattern
   preppattern <- paste(preppattern,'+(?=',postpattern,')',sep = '')  #prepare the pattern
   #cat(preppattern)
-  str_extract(string,pattern = preppattern)
+  stringr::str_extract(string,pattern = preppattern)
 }
+
+#given a long file path, will get you the file name without the extension or with it and the name of the
+#parent directory
+#fullpath: full path of the file with folder separator "/"
+getFileAndDir <- function(fullpath,sep='/',op=1) {
+  # Split the path by '/'
+  parts <- strsplit(fullpath, sep)[[1]]
+  
+  # Get the directory name (second last element of the parts)
+  directory_name <- tail(parts, 2)[1]
+  # Get the file name (last element of the parts)
+  file_name_with_ext <- tail(parts, 1)[1]
+  # Remove the file extension from the file name
+  if(op==1) file_name <- sub("\\.[^.]*$", "", file_name_with_ext)
+  else file_name <- file_name_with_ext
+  
+  # Return the directory name and file name without extension
+  list(directory_name = directory_name, file_name = file_name)
+}
+
+#check if two structures are the same, if not print statement
+checkSame <- function(item1,item2,stmt='',op=1){
+  #cat('\nchecksame',all(item1 == item2))
+  if (all(item1 == item2)) return(T)
+  else {
+    stop(stmt)
+  }
+}
+
+
 
 #tells you if the pattern is a number or stringnumber like string1, string2 etc
 isStringNo <- function(strings,op=1){
@@ -393,6 +464,22 @@ searchStringVecStart <- function(vec.str1,vec.str2,op=2){
   res
 }
 
+# Function to check if strings in vec.str2 contain any of the strings in vec.str1
+searchStringVecContains <- function(vec.str1, vec.str2) {
+  # Initialize an empty list to store results
+  res.lst <- vector("list", length(vec.str1))
+  names(res.lst) <- vec.str1  # Name the list elements using vec.str1
+  
+  # Loop through each string in vec.str1
+  for (i in seq_along(vec.str1)) {
+    pattern <- vec.str1[i]
+    # Find positions in vec.str2 where the pattern occurs
+    posns <- which(sapply(vec.str2, function(x) str_detect(x, fixed(pattern))))
+    res.lst[[i]] <- posns
+  }
+  res.lst  
+}
+
 #given a set of vectors of the forms "#1,#2,#3" arranges them so that they are in the following form where the rows
 #are ordered by the first column, then the second and so on
 #vecstrs: vector strings
@@ -410,6 +497,35 @@ orderVecStringNos <- function(vecstrs,vecval=c(),op=1){
   else entries.full <- cbind.data.frame(entries,1:nrow(entries),vecstrs,vecval)
   res <- getMatSortCols(entries.full,cols=1:ncol(entries),op=3)
   switch(op,res,entries.full)
+}
+
+# Helper function to process strings based on operation mode
+#If vec.strings has non-numeric characters, then based on 
+#op=1, return vec.string, 
+#op=2, return the numeric part of the strings and if there is no numeric part return 
+procStrings <- function(s, op=1) {
+  if (op == 1) {
+    return(s)
+  } else if (op == 2) {
+    if (grepl('^[0-9.]+$', s)) {#checks if the string is only numbers
+      return(as.numeric(s))
+    } else {#if it is not, extracts the numbers from it
+      nums <- regmatches(s, gregexpr('[0-9.]+', s))
+      if (length(nums[[1]]) > 0) {
+        return(as.numeric(paste(nums[[1]], collapse = '')))
+      } else {
+        return('')
+      }
+    }
+  }
+}
+
+#this function converts a vector of strings to numbers
+#If vec.strings has non-numeric characters, then based on 
+#op=1, return vec.string, 
+#op=2, return the numeric part of the strings and if there is no numeric part return 
+convertVecString2Nos <- function(vec.strings, op = 1) {
+  sapply(vec.strings, procStrings, op = op)
 }
 
 #takes a string with a blank between numbers and makes it into a numeric vector
@@ -451,6 +567,86 @@ convertStringNos2Df <-function(strvec,sep=' ',op=1){
   if(op==1) res.df <- cbind.data.frame(strvec,res)
   names(res.df)[1] <- 'id.string'
   res.df
+}
+
+#given a string that contains a sequence of numbers, converts it into a vector of the numbers
+convertStringNoSeq2Vec <- function(number_string,op=1){
+  number_vector <- as.numeric(unlist(strsplit(number_string, " ")))
+  number_vector
+}
+
+#function that takes a vector of strings vec.str and a vector of patterns vec.patterns. 
+#It separates the strings into different vectors based on the specified patterns and 
+#returns a list of these vectors, with each list item named according to the patterns
+strSeparateByPattern <- function(vec.str,vec.patterns,op=1){
+  # Create an empty list to store the separated vectors
+  res.lst <- vector("list", length(vec.patterns))
+  # Name the list using the pattern names
+  names(res.lst) <- vec.patterns
+  # Loop through each pattern
+  for (pattern in vec.patterns) {
+    # Check for patterns with `~` for negation
+    if (startsWith(pattern, "~")) {
+      # Remove the `~` and handle the absence of a pattern
+      actual.pattern <- substring(pattern, 2)
+      # Replace `#` with `[0-9]+` to match any numbers
+      actual.pattern <- gsub("#", "[0-9]+", actual.pattern)
+      # Find strings that do NOT match the pattern
+      res.lst[[pattern]] <- vec.str[!grepl(actual.pattern, vec.str)]
+    } else {
+      # Replace `#` with `[0-9]+` to match any numbers
+      actual.pattern <- gsub("#", "[0-9]+", pattern)
+      # Find strings that match the pattern
+      res.lst[[pattern]] <- vec.str[grepl(actual.pattern, vec.str)]
+    }
+  }
+  res.lst
+}
+
+# Function to reverse a string
+reverseString <- function(str) {
+  # Split the string into individual characters
+  chars <- strsplit(str, NULL)[[1]]
+  # Reverse the characters
+  reversed <- rev(chars)
+  # Collapse them back into a single string
+  return(paste(reversed, collapse = ""))
+}
+
+# Function to parse a string and separate alphabets and numbers
+parseStrAlpNos <- function(str,op=1) {
+  # Use regular expression to find sequences of letters and numbers
+  matches <- gregexpr("([A-Za-z]+|[0-9]+)", str)
+  # Extract the matched elements
+  parsed.elements <- regmatches(str, matches)[[1]]
+  # If op = 2, further split each alphabetic character into individual characters
+  if (op == 2) {
+    parsed.elements <- unlist(lapply(parsed.elements, function(x) {
+      if (isCharAlphabet(x)) {
+        return(strsplit(x, NULL)[[1]])  # Split alphabetic characters into individual characters
+      } else {
+        return(list(x))  # Keep numbers as single elements
+      }
+    }), recursive = FALSE)
+  }  
+  parsed.elements
+}
+
+# Function to check if a character is a number
+isCharNumber <- function(char) {
+  return(grepl("^[0-9]+", char))
+}
+
+# Function to check if a character is an alphabet
+isCharAlphabet <- function(char) {
+  return(grepl("^[A-Za-z]+", char))
+}
+
+# Function to split a string by "_" and return all parts as a vector
+genSepText <- function(str,sep='_',op=1) {
+  # Split the string by the separator "_"
+  parts <- strsplit(str, sep)[[1]]
+  parts
 }
 
 
@@ -920,6 +1116,8 @@ filterVectorCombos <- function(veclst,sep=',',op=1){
   res
 }
 
+
+
 #given two intervals it will either tell you if they overlap, or how much they overlap
 #result: 
 #inputop: input, e.g., int1 is of the form 1 = c(x1,x2) or 2 = c(mn,sem) so it is c(mn-sem,mn+sem)
@@ -996,6 +1194,93 @@ getIntervalsCommon <- function(lstinter,op=1){
 convertMeanWidthInterval<-function(mn,width,op=2){
   switch(op,c(mn,width),c(mn-width,mn+width) )
 }
+
+
+
+#is the value within the interval: Same as isValInInterval
+#op =1: include end points, 2: do not include end points
+isBwInterval <- function(val,int.st,int.end,op=1){
+  if(val > int.st && val < int.end) return(T)
+  F
+}
+
+#is the value within the interval, 
+#op =1: include end points, 2: do not include end points
+isValInInterval <- function(val,int.st,int.end,op=1){
+  if(val > int.st && val < int.end) return(T)
+  F
+}
+
+#gets the euclidean distance between the two points
+getDistancePts <- function(pt1,pt2,op=1){
+  res.dif <- pt2 - pt1
+  res.dist <- sqrt(sum(res.dif^2))
+  res.dist
+}
+
+#function that computes 1/z = 1/x + 1/y + 1/z
+computeInverseSum <- function(vec,op=1){
+  sum(1/vec)^-1
+}
+
+#function that gets the harmonic mean of the vector
+#op:1 - inputs are given by ve=(x,y,x,..) where the mean is computed on 1/x + 1/y ...
+computeHarmonicMean <- function(vec,op=1){
+  harm.vec <- sapply(vec, function(x) 1/x)
+  harm.mn <- sum(harm.vec)/length((harm.vec))
+  harm.mn
+}
+
+#checks if the number is an intger
+isInt <- function(no,op=1){
+  if(ceiling(no)==floor(no)) return(T)
+  else return(F)
+}
+
+#if no is a single number, returns a vector of (no,no,...ntimes) else if it is vector
+#just returns no
+checkNo2vec <- function(no, n) rep(no, each = if(length(no) == 1) n else 1)
+
+#if no is a single number or vector, returns a vector that has n elements in it
+#if 
+padNoVec <- function(no, n) {
+  if(length(no) <= n) res <- c(no,rep(no,n-length(no)))[1:n]
+  else res <- res <- no[1:n]
+  res
+}
+
+#given a sorted vector,ind.vec, that starts from 1 to some number, 
+#find the smallest number that is not in ind.vec
+findMissingNumber <- function(ind.vec,op=1) {
+  # Loop through the vector and compare with the expected sequence
+  for (i in seq_wrap(1,length(ind.vec))) {
+    if (ind.vec[i] != i) {
+      return(i)  # Return the first missing number
+    }
+  }
+  # If no gaps were found, return the next number after the last element
+  return(length(ind.vec) + 1)
+}
+
+#given a vector calculates the extremum, min and max
+getExtrema <- function(vec,op=1){
+  c(min(vec),max(vec))
+}
+
+#in the vector substitute a with b
+subVecVal <- function(vec,a,b,op=1){
+  vec[vec == a] <- b
+  vec
+}
+
+#in a vector remove the element
+removeVecVal <- function(vec,a,op=1){
+  vec <- vec[vec!=a]
+  vec
+}
+
+
+
 
 #swaps two elems
 swap<-function(elem1,elem2,op=1){
@@ -1120,6 +1405,16 @@ getVecSum <-function(vec,tot,start=1,op=1){
   }
   len
 }
+
+#function  if condn is T, it return the variable in yes, otherwise it returns the variable in no
+checkCond <- function(condn, yes, no) {
+  if (condn) {
+    return(yes)
+  } else {
+    return(no)
+  }
+}
+
 
 
 

@@ -584,6 +584,7 @@ modifyDuplicateStrs <- function(vecstr,sep='.',op=1){
 
 #join a list of DFs all which have different columns. 
 #lstdfs: list of DFs
+#op: 1, join one on top of each other; 2 - join one next to each other
 joinListDFs <- function(lstdfs,op=1){
   lens <- sapply(lstdfs, function(x) ncol(x))
   #check that all DFs have the same number of cols
@@ -592,9 +593,36 @@ joinListDFs <- function(lstdfs,op=1){
     cat('\nDfs do not have the same number of cols')
     return(F)
   }
-  res <- do.call(rbind.data.frame,lstdfs)
+  #cat('\n',str(lstdfs))
+  res <- switch(op,do.call(rbind.data.frame,lstdfs),do.call(cbind.data.frame,lstdfs))
   res
 }
+
+#concatenates a list of DFs using the operations specified by op
+#op= 1, add corresponding columns across the dfs, 2 - multiply
+concatListDfs <- function(lst.dfs, op = 1) {
+  # Determine the operation based on 'op'
+  if (op == 1) {
+    operation <- `+`
+  } else if (op == 2) {
+    operation <- `*`
+  } else {
+    stop("Invalid operation specified. Use op = 1 for addition, op = 2 for multiplication.")
+  }
+  
+  # Use Reduce to apply the operation across all dataframes
+  # Use Reduce to sum the dataframes
+  res.df <- Reduce(function(x, y) {
+    if(!identical(dim(x), dim(y))) {
+      stop("Dataframes have different dimensions.")
+    }
+    #cat('\n',str(x),str(y))
+    x + y
+  }, lst.dfs)
+  
+  res.df
+}
+
 
 #joins the list given in lst
 #not sure how this works. Will discovver when we need it.
@@ -608,6 +636,56 @@ joinLists <- function(lst,level=1,op=1){
   if(class(flatlst[[1]]) == class(list(1)) && level > 1) flatlst <- joinLists(flatlst,level=level-1,op=op)
   flatlst
 }
+
+# This takes in a list of lists of vector, and from each list takes the element corresponding to name
+# and joins each such element from each of the lists into one long vector
+# lists: a list of list of vectors
+# name: the name of the vector to be chosen from every list
+concatenateVectorsByName <- function(lists, name) {
+  concatenated_vector <- do.call(c, lapply(lists, function(list) {
+    # If the name exists in the list, return it; otherwise, return an empty numeric vector
+    if (!is.null(list[[name]])) {
+      list[[name]]
+    } else {
+      numeric(0)  # Important for op = 2, ensuring consistent vector lengths when concatenating
+    }
+  }))
+  return(concatenated_vector)
+}
+
+#tmp1 <- res5$`./mouse163`$mouse163$summary$freqlist
+#res5$`./mouse163`[[1]][[1]]$freqlist
+
+#concatenates a list of lists of Vectors, where each list contains names vectors. It concatenates
+#those vectors that have common names across the lists 
+#lists: the list of lists
+#op:1 - common names, 2 - all names
+concatenateListsVec <- function(lists, op = 1) {
+  # Check if the input is non-empty and correctly structured
+  if (length(lists) == 0 || !all(sapply(lists, is.list))) {
+    stop("Input must be a non-empty list of lists.")
+  }
+  # Determine the set of names to be processed based on op
+  list_names <- lapply(lists, names)
+  if (op == 1) {
+    # Common names across all lists
+    names_to_use <- Reduce(intersect, list_names)
+  } else if (op == 2) {
+    # All names across all lists
+    names_to_use <- unique(unlist(list_names))
+  } else if (op == 3) {
+    # Only uncommon names
+    names_to_use <- setdiff(unique(unlist(list_names)), Reduce(intersect, list_names))
+  } else {
+    stop("Invalid value for op. Use 1 for common names, 2 for all names, 3 for uncommon names.")
+  }
+
+  # Create the new list with concatenated vectors for the selected names
+  combined_list <- setNames(lapply(names_to_use, function(name) concatenateVectorsByName(lists, name)), names_to_use)
+  
+  return(combined_list)
+}
+
 
 #join a list of DFs all which have different columns. 
 #only applies when all the columns are of the same type: preffereably numeric
@@ -719,6 +797,7 @@ flattenLists <- function(lst,level=1,op=1){
     else flatlst.names <- c(flatlst.names,paste(names(lst)[i],names(lst[[i]]),sep = ','))
   }
   names(flatlst) <- flatlst.names
+  #cat('\nflattenlists',str(flatlst))
   if(class(flatlst[[1]]) == class(list(1)) && level > 1) flatlst <- flattenLists(flatlst,level=level-1,op=op)
   flatlst
 }
@@ -850,6 +929,14 @@ getDFColsAsLists <-function(...,cols=c(2),cnames=c()){
   clst
 }
 
+#measuring the number of NAs in a structure, percentage wise. 
+#op: 1 - overall structure, 2 - no of columns with an NA, 3 - no of rows with an NA
+countNA <- function(dat.df,op=1){
+  
+  
+}
+
+
 #this cleans up all occurances of NA in a list
 cleanNA <- function(data,op=1){
   if(is.data.frame(data)) return(data[complete.cases(data),])
@@ -857,6 +944,7 @@ cleanNA <- function(data,op=1){
 }
 
 #this cleans NA from a matrix or data frame
+#op=1, turn NA to 0
 cleanNAMat <- function(dat,op=1){
   tmp <- dat
   tmp[!is.finite(tmp)] <- 0
@@ -1177,6 +1265,26 @@ repVecMat <- function(vec,n,op=1){
   res
 }
 
+#gets the correlation of a list of vectors. sets NAs to 0
+corListVectors <- function(lst1, lst2,op=1) {
+  # Efficiently compute correlation using vapply()
+  res <- sapply(seq_along(lst1), function(i) {
+    x <- lst1[[i]]; y <- lst2[[i]]
+    
+    # If scalaar, can't do correlation
+    if (length(x) == 1 || length(y) == 1 || sd(x) == 0 || sd(y) == 0) cor.res <- 0
+    else {    
+      # Compute correlation, replace NA with 0
+      cor.res <- cor(x, y, use = "pairwise.complete.obs")
+      if(length(cor.res) != 1) cat('\nnot1',i)
+      cor.res <- ifelse(is.na(cor.res), 0, cor.res)
+    }
+    cor.res
+  })#, numeric(1))  # Predefine output type for efficiency
+  names(res) <- names(lst1) #set the names to the names of lst1 
+  res
+}
+
 #function adds a list of vectors
 #vec.lst: list of vectors
 #op=1 sum, =2 positive nos are set to 1.
@@ -1332,6 +1440,7 @@ getStatsColsListDfs <- function(lst,op=1){
   res.ls
 }
 
+
 #given a data frame, extracts the numeric value from colnames and changes the col
 #names accordingly
 #factorcol: ignore factor names
@@ -1339,6 +1448,87 @@ changeDfNames <- function(dat.df,factorcol=1,op=1){
   dfnames <- colnames(dat.df)
   dfnum <- sapply(dfnames[-factorcol],function(x) strsplit(x,'\\D+')[[1]][1])
   as.numeric(dfnum)
+}
+
+#checks if the current.df row elements and the names of elements in current.vec match 
+#op=1: just check for matching lengths
+#op=2: check if the names of vec and entries of first row of df match
+#op=3: chekc if the names of vec are present within the entries of first row of df
+checkDfVecMatch <- function(current.df, current.vec, op=1) {
+  if (op == 1) {
+    # Check if the number of elements and rows are the same
+    #cat('\ncheckdfg',nrow(current.df),'sfks',length(current.vec))
+    return(length(current.vec) == nrow(current.df))
+  } else if (op == 2) {
+    # Check if the names of vector elements match the entries in the first column of the dataframe
+    return(all(names(current.vec) == current.df[,1]))
+  } else if (op == 3){
+    #chekc if the names of vec are present within the entries of first row of df
+    # cat('\ncheckdfg',current.df[,1],'sfks',names(current.vec),':',
+    #     ( names(current.vec) %in% as.character(current.df[,1])))
+    return( all(names(current.vec) %in% as.character(current.df[,1])) )
+  } else {
+    stop("Invalid operation specified. Use op = 1 for count check, op = 2 for name match check.")
+  }
+}
+
+#function that checks based on op=1, check that the number of elements in the 
+#frequency vector and the rows in the dataframe are the same, 
+#op =2, check that the names of the vector elements and the entries in the first column of the dataframe match.
+#op=3: chekc if the names of vec are present within the entries of first row of df
+#freq.lst = list of frequency vectors
+#lst.dfs = list of data frames where each row corresponds to the elements  of the frequency vectors
+checkListVecDF <- function(lst.dfs, freq.lst, op = 1) {
+  # Apply the check.pair function to each item and collect results
+  results <- sapply(names(lst.dfs), function(df.name) {
+    current.df <- lst.dfs[[df.name]]
+    current.vec <- freq.lst[[df.name]]
+    checkDfVecMatch(current.df, current.vec, op=op)
+  })
+  # Return the results as a named vector
+  #cat('\nresults',str(results),'\n',names(lst.dfs),names(freq.lst))
+  results
+}
+
+
+
+#this function given a frequency list and  data frame of the means and sems of the 
+#items in the frequency list, will give you the total stats
+computeTotalStats <- function(freq.vec, data.df,op=1) {
+  # Ensure the names in the dataframe are aligned with the frequency vector
+  aligned.df <- data.df[match(names(freq.vec), data.df[,1]), ]
+  # Calculate total value as mean * frequency
+  total.value <- aligned.df[,2] * freq.vec
+  # Calculate total standard deviation as SEM * sqrt(frequency)
+  total.sd <- (aligned.df[,3] * sqrt(freq.vec))^2
+  # Create a result dataframe
+  result.df <- data.frame(
+    name = names(freq.vec),total = total.value,totalsd2 = total.sd)
+  result.df
+}
+
+#takes a list of frequency vectors and their corresponding data framees containing 
+#the means and sems of each freqeuncy vector and gets the mean and sem for the whole populatio
+computeListTotalStats <- function(freqvec.lst,lst.dfs,op=1){
+  if(all(checkListVecDF(lst.dfs = lst.dfs,freq.lst = freqvec.lst,op=3)) == F) return(F) 
+  #first compute the total stats
+  res.totaldfs <- lapply(names(freqvec.lst), function(x) 
+    computeTotalStats(freq.vec = freqvec.lst[[x]],data.df = lst.dfs[[x]]))
+  rows <- getListDFsColRange(lst.dfs = lst.dfs,n=1) #get a range of elements 
+  res.ls <- lapply(rows, function(i) {
+    freqsum <- sum(cleanNAVec(getNElem(freqvec.lst,i)))
+    avg <- sum(cleanNAVec(getListDfsMRowNElem(res.totaldfs,i,2)) )/freqsum
+    sem <- sqrt(sum(cleanNAVec(getListDfsMRowNElem(res.totaldfs,i,3))) )/freqsum
+    #cat('\nres:',i,cleanNAVec(getListDfsMRowNElem(res.totaldfs,i,3)),freqsum )
+    c(i,avg,sem)
+  })
+  
+  #print(res.ls)
+  res.df <- do.call(rbind,res.ls)
+  res.df <- res.df[complete.cases(res.df),] #remove rows with NA in it
+  colnames(res.df) <- c('item','avg','sem')
+  row.names(res.df) <- 1:nrow(res.df)
+  res.df
 }
 
 
@@ -1480,6 +1670,38 @@ getNElem <- function(lst,n,op=1){
   sapply(lst,function(x) x[n]) #goes thru the list and gets the nth element
 }
 
+#given a list of data frames gets the Nth element of the Mth row from all dataframes
+getListDfsMRowNElem <- function(lst.dfs,m,n,op=1) {
+  # Use lapply to iterate over the list of dataframes
+  result <- lapply(lst.dfs, function(df) {
+    # Check if the dataframe has enough rows
+    if (nrow(df) >= m) {
+      return(df[m, n])  # Return the second element of the nth row
+    } else {
+      return(NA)  # Return NA if the nth row does not exist
+    }
+  })
+  # Convert the list to a vector
+  res <- unlist(result)
+  names(res) <- names(lst.dfs)
+  res
+}
+
+#given a list of dataframes, gets the nth column of each and returns a list of 
+#values arranged in sorted order, without duplicates
+getListDFsColRange <- function(lst.dfs,n,op=1){
+  # Extract the nth column from each dataframe in the list
+  res.ls <- lapply(lst.dfs, function(df) {
+    if (ncol(df) >= n) {
+      return(df[,n])
+    } else {
+      return(NULL)  # Return NULL if the dataframe does not have an nth column
+    }
+  })
+  res <- sort(unique(cleanNAVec(unlist(res.ls))))
+  res
+}
+
 #this function takes a data.lst and means which is the same length as data.lst and returns
 #an data frame with 2 columsn. The 1st are the unpacked elements of data.lst, and the 2nd
 #is means, such that means[i] is repeated as many times as the length of length(data.lst[[i]])
@@ -1492,6 +1714,27 @@ makeXYDf <- function(data.lst,means,op=1){
   })
   switch(op,data.frame(unlist(data.lst),unlist(res)),
          data.frame(unlist(res),unlist(data.lst)))
+}
+
+
+#gien a matrix will rotate it based on op
+#op: 1, rotate once to the left. 2 - rotate once to the right
+rotateMatrix <- function(mat,op=1){
+  #rotate to the left: take the first row, make it the first column, 2nd row 2nod col and ...
+  #the top elem of row 1 is the first element of the column
+  nr <- nrow(mat); nc <- ncol(mat)
+  newmat <- matrix(rep(0,prod(nr,nc)),nrow = nc,ncol = nr)
+  #rotate so that the 1st col, is the first row but in reverse
+  switch(op,for (i in seq_wrap(1,nr)) {
+    newmat[,i] <- rev(mat[i,])  
+  }, #right rotation: 1st row is the first col but in reverse
+  for (i in seq_wrap(1,nc)) {
+    newmat[i,] <- rev(mat[,i])  
+  })
+  #names: left rotation - columns reverse, right rotation - rows reverse
+  colnames(newmat) <- switch(op,rownames(mat),rev(rownames(mat)))
+  rownames(newmat) <- switch(op,rev(colnames(mat)),colnames(mat)) 
+  newmat
 }
 
 #transpose a data frame
@@ -1584,7 +1827,160 @@ shrinkMat <- function(mat,shrinkfactors=c(),op=1){
   res
 }
 
-#scales all the other columns of the matrix so that they have the same as the column
+
+#scales the vector so the minimum and maximum values are stretced by scale factor
+#which implies the values in between will also be changed accordingly
+#op=1, scale while keeping the min the same, 2 - keeping the center the same
+scaleVec <- function(vec,scale.fac=1,op=1){
+  vec.min <- min(vec)
+  newvec <- sapply(vec, function(x) vec.min + (x-vec.min)*scale.fac)
+  if(op==1) return(newvec)
+  cur.range <- max(vec) - min(vec) 
+  newmin <- mean(vec) - (cur.range*scale.fac)/2
+  newvec <- newvec - (vec.min - newmin)
+  newvec
+}
+
+#scales the vector to be in the following ranage
+#vec: the vector to be scaled
+#rangeval: the range to which t should be scaled given as c(rangemin,rangemax)
+scaleVecRange <- function(vec,rangeval,op=1){
+  cur.min <- min(vec); cur.max <- max(vec)
+  scale.fac <- (rangeval[2] - rangeval[1])/(cur.max - cur.min)
+  newvec <- (vec-cur.min)*scale.fac + rangeval[1]
+  newvec
+}
+
+#function that computes the minimum, maximum, or mean for specified columns of a 
+#data frame based on the value of the op parameter:
+getDfBasics <- function(dat.df, cols, op = 1) {
+  # Define the function to apply based on the option
+  stat.func <- switch(op,
+                      `1` = min,   # op = 1 -> minimum
+                      `2` = max,   # op = 2 -> maximum
+                      `3` = mean,  # op = 3 -> mean
+                      stop("Invalid option for op. Use 1 (min), 2 (max), or 3 (mean)."))
+  
+  # Apply the function to the specified columns
+  result <- sapply(dat.df[, cols, drop = FALSE], stat.func, na.rm = TRUE)
+  result
+}
+
+#function works on a list of data frames, where each data frame has the same columns but 
+#different values. The function first combines the data frames by their columns, computes the 
+#specified operation (minimum, maximum, or mean) for the given columns, and returns the result.
+getListDfsBasic <- function(list.dfs, cols, op = 1) {
+  # Combine all data frames in the list by their rows
+  combined.df <- do.call(rbind, list.dfs)
+  
+  # Call the getDfBasics function on the combined data frame
+  result <- getDfBasics(combined.df, cols, op)
+  result
+}
+
+#function that scales all the columns of a list of data frames. Each column from each 
+#data frame is just the same variable. So, normalization is done on a column across all data frames
+#scalefac: the range of over which to normalize. if scale fac is c(min,max), 
+#it adjusts the numbers to go from min to max
+#op=1: normalize by minimnum and max value
+#cols: the cols that have to be examined. If only one number, it is the startin col
+#and cols is col:ncol(dat.df)
+scaleListDfs <- function(lst.dfs,scalefac=c(0,100),cols=c(),op=1){
+  allcols <- condVal(length(cols)==0,1:ncol(lst.dfs[[1]]),condVal(length(cols)==1,cols:ncol(lst.dfs[[1]]),cols))
+  nocols <- ncol(lst.dfs[[1]]) #no of cols
+  no.dfs <- length(lst.dfs)
+  #get the minimum and maximum for each column and normalize
+  comb.df <- do.call(rbind,lst.dfs)
+  min.vec <- getDfBasics(comb.df,cols = allcols,op=1)
+  max.vec <- getDfBasics(comb.df,cols = allcols,op=2)
+  #cat('\nst',cols,allcols,'\n',min.vec,str(comb.df))
+  range.vec <- max.vec - min.vec
+  norm.mat <- rbind(min.vec,max.vec,range.vec)
+  #now, go through each data frame, and for each column scale the elements
+  #so that they fall within a range from 0 to 1 and then you can scale it
+  #first, determine the scaling factors
+  scale.f <- scalefac[2] - scalefac[1]; scale.m <- scalefac[1]
+  comb.df[,allcols] <- sweep(sweep(comb.df[, allcols], 2, min.vec, "-"), 2, range.vec, "/") * scale.f + scale.m
+  res.ls <- splitDfByLen(comb.df,len.seq = sapply(lst.dfs,nrow))
+  return(res.ls)
+  res.ls <- lapply(1:no.dfs, function(i){
+    #for each df normalize all columns: scale.min + ((val-min)/range)*scale.range
+    allcols <- sapply(1:ncol(lst.dfs[[i]]), function(j){
+      res <- ((lst.dfs[[i]][,j] - norm.mat[1,j])/norm.mat[3,j] * scale.f) + scale.m
+    })
+    res.struct <- matchDataStruct(lst.dfs[[i]],allcols) #ensures that the 2 structures match
+  })
+  #now splut comb.df back into 3. 
+  res.ls
+}
+
+#given a dataframe dat.df, and length sequence, will break dat.df on the basis of this. 
+splitDfByLen <- function(dat.df,len.seq=c(),op=1){
+  res.ls <- split(dat.df,unlist(lapply(1:length(len.seq),function(i) rep(i,len.seq[i]))))
+  res.ls
+}
+
+#function condVal, which takes three arguments: condition, yesval, and noval. The function
+#returns yesval if condition is TRUE, and noval otherwise.
+condVal <- function(condition, yesval, noval) {
+  if (condition) {
+    return(yesval)
+  } else {
+    return(noval)
+  }
+}
+
+#function that will take a structure dat.df which can be a matrix or data frame, and a second strcture, 
+#moddat.df which is some processed form of dat.df. The function should ensure that moddat.df has the
+# same columnnames and rownames as dat.df, and is of the same type as dat.df
+matchDataStruct <- function(dat.df, moddat.df,op=1) {
+  # Ensure column names are the same
+  if (!is.null(colnames(dat.df))) {
+    colnames(moddat.df) <- colnames(dat.df)
+  }
+  # Ensure row names are the same
+  if (!is.null(rownames(dat.df))) {
+    rownames(moddat.df) <- rownames(dat.df)
+  }
+  # Ensure the type matches
+  if (is.data.frame(dat.df) && !is.data.frame(moddat.df)) {
+    moddat.df <- as.data.frame(moddat.df)
+  } else if (!is.data.frame(dat.df) && is.data.frame(moddat.df)) {
+    moddat.df <- as.matrix(moddat.df)
+  }
+  moddat.df
+}
+
+#takes a data frame dat.df and returns a vector containing the indices of all numeric columns in ascending order
+getNumericColsDf <- function(dat.df) {
+  # Check if each column is numeric
+  numeric.indices <- which(sapply(dat.df, is.numeric))
+  
+  # Return the indices in ascending order (default behavior of `which`)
+  numeric.indices
+}
+
+
+#scales a matrix or data frames so that in any column the values go from min to max as specified by
+#scalefac: the range of over which to normalize. if scale fac is c(min,max), 
+#it adjusts the numbers to go from min to max
+#op=1: normalize by minimnum and max value
+#cols: the cols that have to be examined. If only one number, it is the startin col
+#and cols is col:ncol(dat.df)
+scaleDF <- function(dat.df,scalefac=c(0,100),cols=c(),op=1){
+  allcols <- condVal(length(cols)==0,1:ncol(lst.dfs[[1]]),condVal(length(cols)==1,cols:ncol(lst.dfs[[1]]),cols))
+  #get the scaling range and the minimum
+  scale.f <- scalefac[2] - scalefac[1]; scale.m <- scalefac[1] 
+  min.vec <- getDfBasics(dat.df,cols = allcols,op=1)
+  max.vec <- getDfBasics(dat.df,cols = allcols,op=2)
+  range.vec <- max.vec - min.vec
+  data.df <- dat.df
+  data.df[,allcols] <- sweep(sweep(dat.df[, cols], 2, min.vec, "-"), 2, range.vec, "/") * scale.f + scale.m
+  data.df
+}
+
+
+#scales all the other columns of the matrix so that they have the same mean as the column
 #specified by col
 #scalemean: scale to a specified mean
 #scaletype: scale to mean, max, or min
@@ -1793,6 +2189,42 @@ convertListNos2Str <- function(lst,op=1){
   res.ls
 }
 
+# Function to fill missing values in a vector
+# vector: that we want to fill
+# full_names: the names of vector elements with no missing entries
+fill_missing <- function(vector, full_names, fill_value=0,op=1) {
+  existing_names <- names(vector)
+  missing_names <- setdiff(full_names, existing_names)
+  vector[missing_names] <- fill_value
+  vector[full_names]  # Return with correct order
+}
+
+
+#function that takes a list of vectors, where each vector might have missing named entries, 
+#and pads the missing values with fill_value
+#op=1, returns as a list, 2: return as a DF
+ConvertListWMissEntry <- function(vec.lst, value = 0, op = 1) {
+  # Determine the complete range of names across all vectors
+  all_names <- unique(unlist(lapply(vec.lst, names)))
+  min_name <- min(as.integer(all_names))
+  max_name <- max(as.integer(all_names))
+  full_names <- as.character(min_name:max_name)
+  
+  # Apply the fill function to each vector in the list
+  filled_vectors <- lapply(vec.lst, fill_missing, full_names, value)
+  
+  # Depending on op, return a list or a data frame
+  if (op == 1) {
+    res <- filled_vectors
+  } else if (op == 2) {
+    # Combine filled vectors into a data frame
+    res <- as.data.frame(do.call(rbind, lapply(filled_vectors, function(x) as.numeric(x))))
+    names(res) <- full_names
+  } else res <- vec.lst
+  res
+}
+
+
 #converts a list with an unequal number of elements into a data frame by converting 
 #everything to a list of characters/strings and then padding them all with 'pad' to 
 #get the same length.
@@ -1814,13 +2246,23 @@ convertUnequalListToDf <- function(dat.lst,pad='na',op=1){
 #coltype: 1 = keep the first column as a string, 2 - change it to numeric
 #op=1
 convertListToDF <- function(dat.lst,coltype=2,op=1){
-  lst.names <- switch(coltype,names(dat.lst),as.numeric(names(dat.lst)) )
+  #cat(names(dat.lst),coltype)
+  lst.names <- switch(coltype,names(dat.lst),convertVecString2Nos(names(dat.lst)) )
   #do it with a for loop
   res.df <- cbind.data.frame(dat.lst[[1]],stringsAsFactors=F)
-  for (i in 2:length(dat.lst)) {
+  if(isDataType(dat.lst[[1]]) == 3)
+    name.vec <- names(dat.lst[[1]])
+  #cat('\nconL2DF',names(dat.lst[[1]]),':',isDataType(dat.lst[[1]]),str(dat.lst[[1]]))
+  for (i in seq_wrap(2,length(dat.lst)) ) {
     res.df <- cbind.data.frame(res.df,dat.lst[[i]],stringsAsFactors=F)
+    if(isDataType(dat.lst[[i]]) == 3)
+      name.vec <- c(name.vec,names(dat.lst[[i]]))
   }  
-  colnames(res.df) <- names(dat.lst)
+  #cat('\nconverLtoD')
+  if(isDataType(dat.lst[[1]]) == 3)
+    colnames(res.df) <- name.vec
+  else
+    colnames(res.df) <- names(dat.lst)
   #res <- joinListDFs(lst.dfs)
   res.df
 }
@@ -1829,7 +2271,7 @@ convertListToDF <- function(dat.lst,coltype=2,op=1){
 #coltype: 1 = keep the first column as a string, 2 - change it to numeric
 #op=1
 convertListToDF.old <- function(dat.lst,coltype=2,op=1){
-  lst.names <- switch(coltype,names(dat.lst),as.numeric(names(dat.lst)) )
+  lst.names <- switch(coltype,names(dat.lst),convertVecString2Nos(names(dat.lst),op=1) )
   lst.dfs <- lapply(1:length(dat.lst),function(i){
     tmp <- rep(lst.names[i],length(dat.lst[[i]]))
     #cat('\n',i,':',tmp,dat.lst[[i]])
@@ -1837,6 +2279,17 @@ convertListToDF.old <- function(dat.lst,coltype=2,op=1){
   })
   res <- joinListDFs(lst.dfs)
   res
+}
+
+#given a Matrix or Df with x,y,z or any other coordinates along the columns, will calculate the center
+#headrow: the row for the default values
+computeMatCenter <- function(mat,cols=c(),headrow=1,op=1){
+  res.df <- mat[headrow,]
+  #given a dataframe will compute the mean of the cols
+  for (i in cols) {
+    res.df[1,i] <- mean(mat[,i])
+  }
+  res.df
 }
 
 #function takes a DF or matrix and gives all the rows where the prescribed col
@@ -1933,6 +2386,15 @@ sdDF <- function(mat.df,col=1,op=1){
   res.df
 }
 
+#will renormalize the value of every row so that each column value is the column value divided by the sum of the row
+#dat.df: the DF whose rows are to be renormalized
+renormDF <- function(dat.df) {
+  # Calculate the row sums
+  row.sums <- rowSums(dat.df)
+  # Renormalize each row
+  res.df <- dat.df / row.sums
+  res.df
+}
 
 #gets the minimum of each column of matrix
 getmin <- function(mat){
@@ -2130,12 +2592,38 @@ getRowsDFNonzerosAll <- function(dat.df,thresh=0,op=1){
   res
 }
 
+#generates a DF from a list where the 1st column is the list element name, and the seocnd
+#is the length of the vector elment
+genDfFromList <- function(lst,op=1) {
+  # Get the names of the list elements
+  list.names <- names(lst)
+  #cat('\nlist names',list.names)
+  # Calculate the number of elements in each list element
+  list.lengths <- sapply(lst, length)
+  # Create a data frame with the desired structure
+  res.df <- data.frame(index = list.names, no.children = list.lengths)
+  res.df
+}
 
 #convert the cols of a DF into a list
 #if op = 2, convert the rows to lists
 convertDfToList <- function(dat.df,op=1){
   switch(op,as.list(dat.df),as.list(transposeDF(dat.df)) )
 }
+
+#It takes a dataframe lst and an option op to convert either rows (op=1) or columns (op=2) into list elements.
+#lst: the list to be converted
+convertDfRowsToList <- function(dat.df, op = 1) {
+  # Convert rows to list elements
+  res <- lapply(1:nrow(dat.df), function(i) {
+    row <- unlist(dat.df[i,])
+    names(row) <- colnames(dat.df)
+    row
+  })
+  names(res) <- rownames(dat.df) 
+  res
+}
+
 
 #given a df will tell give you the first N non-zero values
 #n: no of non zero values
@@ -2301,6 +2789,96 @@ getTopNPercentile.old <-function(pop,topn,op=1){
   polst[polst < min(topnos)] <- 0
   switch(op,polst,topnos)
 }
+
+
+#Given a matrix or DF, will calculate all the values that fall within the percentage (Int stands for intervals)
+#ranges iven by a to b, and get the corresponding values for col. dec.col
+#dec.col: the column on which we want the deciles 
+#res.col: the column of results that we want.
+#The return is a list by the deciles numbered 1,2,...10
+#iter: gives the decile size, 10, would give 10 blocks from 0 to 100, 20 would give 5 blocks
+#op=1, vector, 2 - a matrix
+getMatIntPercentVals <- function(mat.swc,dec.col,res.col,iter=10,op=1){
+  dec.vec <- unlist(mat.swc[,dec.col])
+  res.dec <- lapply(seq(0,100-iter,iter), function(i){
+    dec.posns <- getIntPercentage(dec.vec,i,i+iter,op=2)
+    #if(i==90) cat('\nposns',dec.posns)
+    res <- mat.swc[dec.posns,res.col]
+  })
+  names(res.dec) <- seq(0,100-iter,iter)
+  res.dec
+}
+
+#Given a matrix or DF, will calculate all the values that fall within the percentage (Int stands for intervals)
+#ranges iven by a to b, and get the corresponding values for col. dec.col
+#dec.col: the column on which we want the deciles 
+#res.col: the column of results that we want.
+#The return is a list by the deciles numbered 1,2,...10
+#iter: gives the decile size, 10, would give 10 blocks from 0 to 100, 20 would give 5 blocks
+#op=1, vector, 2 - a matrix
+getMatIntPercentileVals <- function(mat.swc,dec.col,res.col,iter=10,op=1){
+  dec.vec <- unlist(mat.swc[,dec.col]) 
+  dec.vec <- c(dec.vec,max(dec.vec)+1) # do this to include the 100th percentile or highest no
+  len <- length(dec.vec)
+  res.dec <- lapply(seq(0,100-iter,iter), function(i){
+    dec.posns <- getIntPercentile(dec.vec,i,i+iter,op=2)
+    #if(i==90) cat('\nposns',dec.posns)
+    res <- mat.swc[dec.posns,res.col]
+  })
+  names(res.dec) <- seq(0,100-iter,iter)
+  res.dec
+}
+
+
+#where vec is the vector of numbers, and range.vals gives the minimum and maximum values of the vector
+# onto whic the numbers of vec is mapped
+# op: 1- return mapped vector, 2 - matrix of original and mapped vector
+mapVecToRange <- function(vec, range.vals, op = 1) {
+  # Extract min and max from range.vals
+  min.range <- range.vals[1]; max.range <- range.vals[2]
+  
+  # Compute the min and max of the input vector
+  min.vec <- min(vec); max.vec <- max(vec)
+  
+  # Scale the values to the new range
+  mapped.vec <- (vec - min.vec) / (max.vec - min.vec) * (max.range - min.range) + min.range
+
+  res <- switch(op,mapped.vec,cbind(vec, mapped.vec))  
+  res
+}
+
+
+
+#function that gets the population interval between percentages a and b, e.g., a=80, b= 90. B/w 80 and 90% 
+#it is inclusive of a
+#op: 1 - the values, 2 - the positions
+getIntPercentage <- function(pop,a,b,prec=0.001,op=1){
+  #algo: get the extremes and the range of values, then take the values that fall within the fractions a and b
+  extremes <- getExtrema(pop)
+  range.pop <- diff(extremes) + extremes[2]*prec # prec helps in include the 100 % number
+  perc.a <- extremes[1] + range.pop*(a/100)
+  perc.b <- extremes[1] + range.pop*(b/100)
+  #cat('\nthe percentages are',perc.a,perc.b)
+  res <- switch(op,pop[pop >= perc.a & pop < perc.b],
+                which(pop >= perc.a & pop < perc.b))
+  res
+}
+
+#function that gets the population interval between percentiles a and b, e.g., a=80, b= 90. B/w 80 and 90% 
+#it is inclusive of a, but not b
+#op: 1 - the values, 2 - the positions
+getIntPercentile <- function(vec,a,b,prec=0.001,op=1){
+  # Compute percentile thresholds
+  lower <- quantile(vec, a / 100, na.rm = TRUE)
+  upper <- quantile(vec, b / 100, na.rm = TRUE)
+  
+  # Efficiently return either values or positions using switch
+  res <- switch(op, vec[vec >= lower & vec < upper],  # Case op = 1: Return values
+         which(vec >= lower & vec < upper) # Case op = 2: Return positions
+  )
+  res
+}
+
 
 #get the top n percentage of population: the faster function
 #topn, the top n fraction, eg.g 10 is top 10 percentile
@@ -2598,7 +3176,9 @@ threshValMatPosns <- function(mat,thresh=0,op=1) {
 #op=1
 countNonZeroes <- function(mat,thresh=0,op=1){
   #is the vector non-empty * no of nonzeroes
+  #cat('\ncounting nonzeroes',length(mat))
   count <- as.numeric(length(mat)>0)*length(which(mat!=thresh))
+  #cat('\ncounting done')
   count
 }
 
